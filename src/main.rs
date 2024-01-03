@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::game::Game;
 
 mod bitboard;
 mod board;
@@ -8,11 +9,11 @@ mod r#move;
 mod game;
 
 fn main() {
-    let board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -";
 
-    let bitboard = format!("{}", board.by_role.kings & board.by_color.white);
-    let board = format!("{}", board);
+    let game = Game::from_fen(fen);
 
-    println!("{}", board);
-    println!("{}", bitboard);
+
+    println!("{:#?}", game);
+    println!("{}", game.board);
 }
