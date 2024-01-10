@@ -3,10 +3,23 @@ use std::{
     fmt::write,
     ops::{BitAnd, BitAndAssign, BitOrAssign, BitXorAssign}, slice::RChunks,
 };
+use std::num::Wrapping;
+use std::ops::{BitOr, BitXor, Not, Shl, Shr};
+use crate::pext::Pext;
+use crate::r#move::Square;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bitboard(pub u64);
 
+
+// 56 57 58 59 60 61 62 63
+// 48 49 50 51 52 53 54 55
+// 40 41 42 43 44 45 46 47
+// 32 33 34 35 36 37 38 39
+// 24 25 26 27 28 29 30 31
+// 16 17 18 19 20 21 22 23
+// 08 09 10 11 12 13 14 15
+// 00 01 02 03 04 05 06 07
 impl Bitboard {
     pub fn from_rank(rank: Rank) -> Bitboard {
         match rank {
@@ -33,6 +46,10 @@ impl Bitboard {
             File::H => Bitboard(0x80_80_80_80_80_80_80_80),
         }
     }
+
+    pub fn from_square(square: Square) -> Bitboard {
+        Bitboard::from_file(square.0) & Bitboard::from_rank(square.1)
+    }
 }
 
 impl BitOrAssign for Bitboard {
@@ -49,6 +66,14 @@ impl BitAnd for Bitboard {
     }
 }
 
+impl BitOr for Bitboard {
+    type Output = Bitboard;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        return Bitboard(self.0 | rhs.0);
+    }
+}
+
 impl BitAndAssign for Bitboard {
     fn bitand_assign(&mut self, rhs: Self) {
         self.0 &= rhs.0
@@ -61,11 +86,43 @@ impl BitXorAssign for Bitboard {
     }
 }
 
+impl Not for Bitboard {
+    type Output = Bitboard;
+
+    fn not(self) -> Self::Output {
+        Bitboard(!self.0)
+    }
+}
+
+impl BitXor for Bitboard {
+    type Output = Bitboard;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 ^ rhs.0)
+    }
+}
+
+impl Shr for Bitboard {
+    type Output = Bitboard;
+
+    fn shr(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 >> rhs.0)
+    }
+}
+
+impl Shl for Bitboard {
+    type Output = Bitboard;
+
+    fn shl(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 << rhs.0)
+    }
+}
+
 impl std::fmt::Display for Bitboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for rank in 0..8 {
+        for rank in (0..8).rev() {
             for file in 0..8 {
-                let bitboard: Bitboard = Bitboard(0x01 << file + (rank * 8 as usize));
+                let bitboard: Bitboard = Bitboard(0x01 << file + (rank * 8usize));
                 if *self & bitboard == Bitboard(0x0) {
                     write!(f, "○ ")?;
                 } else {

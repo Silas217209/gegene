@@ -9,6 +9,10 @@ impl Square {
         return self.0 as i32 + self.1 as i32 * 8
     }
 
+    pub fn from_index(index: i32) -> Square {
+        return Square(File::from_number(index % 8), Rank::from_number(index / 8))
+    }
+
     pub fn from_algebraic(notation: &str) -> Square {
         let mut square = Square(File::A, Rank::First);
         for c in notation.chars() {
