@@ -169,7 +169,6 @@ impl Game {
         let halfmove_clock: i32 = if fen_info.len() <= 3 {
             0
         } else {
-            println!("{:?}", fen_info);
             match fen_info[3].parse() {
                 Ok(n) => n,
                 Err(_) => panic!("invalid FEN: halfmove clock"),

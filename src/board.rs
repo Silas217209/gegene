@@ -286,13 +286,12 @@ impl Board {
 
         // pawns
         let pawns = self.by_role.pawns & enemy_bitboard;
-        let king_reaches = Bitboard(1 << king_square);
+        let king_reaches = my_bitboard & self.by_role.kings;
         let king_reaches = match turn {
             Color::White => Bitboard(king_reaches.0.wrapping_shl(9)) | Bitboard(king_reaches.0.wrapping_shl(7)),
             Color::Black => Bitboard(king_reaches.0.wrapping_shr(9)) | Bitboard(king_reaches.0.wrapping_shr(7)),
         };
 
-        println!("{}", king_reaches);
 
         check_mask |= king_reaches & pawns;
 
@@ -303,6 +302,85 @@ impl Board {
 
         check_mask
     }
+
+    pub fn pin_mask(self, turn: Color) -> Bitboard {
+        let my_bitboard = match turn {
+            Color::White => self.by_color.white,
+            Color::Black => self.by_color.black,
+        };
+        let my_bitboard_without_king = my_bitboard & !(self.by_role.kings & my_bitboard);
+
+
+        let enemy_bitboard = !my_bitboard & (self.by_color.white | self.by_color.black);
+
+        let mut check_mask = Bitboard(0);
+
+        let blockers = enemy_bitboard & !(self.by_role.kings & my_bitboard);
+        let king_square = (my_bitboard & self.by_role.kings).0.trailing_zeros();
+        let king_file = File::from_number(king_square as i32 % 8);
+        let king_rank = Rank::from_number(king_square as i32 / 8);
+
+        // rook moves
+        let rooks = self.by_role.rooks & enemy_bitboard;
+        let queen = self.by_role.queens & enemy_bitboard;
+        let king_reaches = self.rook_attacks(king_square as usize, blockers);
+
+        let king_reaches_north = Bitboard(Bitboard::from_file(king_file).0.wrapping_shl((king_rank as u32 + 1) * 8)) & king_reaches;
+        let king_reaches_south = Bitboard(Bitboard::from_file(king_file).0.wrapping_shr((7 - king_rank as u32) * 8)) & king_reaches;
+
+        let king_rank_above = 0xFFu64.wrapping_shl((king_rank as u32 + 1) * 8);
+        let king_rank_below = 0xFFu64.wrapping_shl((king_rank as u32 - 1) * 8);
+        let horizontal_mask = Bitboard(!(king_rank_above | king_rank_below));
+
+        let king_reaches_east = Bitboard(Bitboard::from_rank(king_rank).0.wrapping_shl(king_file as u32) + 1) & king_reaches;
+        let king_reaches_east = king_reaches_east & horizontal_mask;
+
+        let king_reaches_west = Bitboard(Bitboard::from_rank(king_rank).0.wrapping_shr(8 - king_file as u32)) & king_reaches;
+        let king_reaches_west = king_reaches_west & horizontal_mask;
+
+        for &direction in &[king_reaches_north, king_reaches_south, king_reaches_east, king_reaches_west] {
+            let attack = direction & (rooks | queen);
+
+            if attack != Bitboard(0) {
+                let attack_square = attack.0.trailing_zeros();
+                let attacker_moves = self.rook_attacks(attack_square as usize, blockers);
+
+                if attacker_moves.0.pext(my_bitboard_without_king.0) != 1 {
+                    continue;
+                }
+
+                check_mask |= direction & (attacker_moves | Bitboard(1 << attack_square));
+            }
+        }
+
+        // bishop moves
+        let bishops = self.by_role.bishops & enemy_bitboard;
+        let king_reaches = self.bishop_attacks(king_square as usize, blockers);
+        let (north_mask, east_mask, south_mask, west_mask) = DIRECTION_MASK[king_square as usize];
+
+        let king_reaches_north_east = king_reaches & (north_mask & east_mask);
+        let king_reaches_north_west = king_reaches & (north_mask & west_mask);
+        let king_reaches_south_east = king_reaches & (south_mask & east_mask);
+        let king_reaches_south_west = king_reaches & (south_mask & west_mask);
+
+        for &direction in &[king_reaches_north_east, king_reaches_north_west, king_reaches_south_east, king_reaches_south_west] {
+            let attack = direction & (bishops | queen);
+            if attack != Bitboard(0) {
+                let attack_square = attack.0.trailing_zeros();
+                let attacker_moves = self.bishop_attacks(attack_square as usize, blockers);
+
+                if attacker_moves.0.pext(my_bitboard_without_king.0) != 1 {
+                    continue;
+                }
+
+                check_mask |= direction & (attacker_moves | Bitboard(1 << attack_square));
+            }
+        }
+
+        check_mask
+    }
+
+
 }
 
 impl Display for Board {
