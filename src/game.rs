@@ -5,9 +5,6 @@ use crate::{
     r#move::{Move, Square},
 };
 use crate::bitboard::Bitboard;
-use crate::lookup::knight::KNIGHT_MOVES;
-use crate::lookup::rook_mask::ROOK_MASK;
-use crate::lookup::rook_moves::ROOK_MOVES;
 use crate::pext::Pext;
 
 #[derive(Debug)]
@@ -26,8 +23,8 @@ pub enum Outcome {
 pub struct Game {
     pub board: Board,
     pub turn: Color,
-    pub white_castlinright: CastlingRight,
-    pub can_black_castle: CastlingRight,
+    pub white_castling_rights: CastlingRight,
+    pub black_castling_rights: CastlingRight,
     pub en_passant_target: Option<Square>,
     pub halfmove_clock: i32,
     pub fullmoves: i32,
@@ -36,88 +33,37 @@ pub struct Game {
 
 
 impl Game {
-    pub fn get_legal_moves(self) -> Vec<Move> {
+    pub fn get_legal_moves(self) {
         let my_bitboard = match self.turn {
             Color::White => self.board.by_color.white,
             Color::Black => self.board.by_color.black,
         };
 
-        let enemy_bitboard = match self.turn {
-            Color::White => self.board.by_color.black,
-            Color::Black => self.board.by_color.white,
-        };
+        let enemy_bitboard = !my_bitboard & (self.board.by_color.white | self.board.by_color.black);
 
         let enemy_or_empty = !my_bitboard;
 
-        let blockers = self.board.by_color.white | self.board.by_color.black;
-        println!("{}", blockers);
+        let (chess_mask, count) = self.board.check_mask(self.turn);
 
-        let check_mask = {
-            let mut check_mask = Bitboard(0);
+        if count > 1 {
 
-            let king_square = (my_bitboard & self.board.by_role.kings).0.trailing_zeros();
+        }
 
-            // rooks
-            let rooks = self.board.by_role.rooks & enemy_bitboard;
-            let rook1_square = rooks.0.trailing_zeros();
-            let rook2_square = if rooks.0.leading_zeros() > 63 {
-                64
-            } else {
-                63 - rooks.0.leading_zeros()
-            };
+        let (pin_mask_vh, pin_mask_diagonal) = self.board.pin_mask(self.turn);
 
-            let king_reaches = self.board.rook_attacks(king_square as usize, blockers);
+        for i in 0..64 {
+            let current_square = Bitboard(1 << i);
 
-            if rook1_square <= 63 {
-                let rook1_attack = self.board.rook_attacks(rook1_square as usize, blockers);
-                check_mask |= king_reaches & (rook1_attack | Bitboard(1 << rook1_square));
-            }
-
-            if rook2_square <= 63 {
-                let rook2_attack = self.board.rook_attacks(rook2_square as usize, blockers);
-                check_mask |= king_reaches & (rook2_attack | Bitboard(1 << rook2_square));
-            }
-
-            // bishops
-            let bishops = self.board.by_role.bishops & enemy_bitboard;
-            let bishop1_square = bishops.0.trailing_zeros();
-            let bishop2_square = if bishops.0.leading_zeros() > 63 {
-                64
-            } else {
-                63 - bishops.0.leading_zeros()
-            };
-
-            let king_reaches = self.board.bishop_attacks(king_square as usize, blockers);
-
-            if bishop1_square <= 63 {
-                let bishop1_attack = self.board.bishop_attacks(bishop1_square as usize, blockers);
-                check_mask |= king_reaches & (bishop1_attack | Bitboard(1 << bishop1_square));
-            }
-
-            if bishop2_square <= 63 {
-                let bishop2_attack = self.board.bishop_attacks(bishop2_square as usize, blockers);
-                check_mask |= king_reaches & (bishop2_attack | Bitboard(1 << bishop2_square));
+            if current_square & my_bitboard == Bitboard(0) {
+                continue;
             }
 
 
-            let knights = self.board.by_role.knights & enemy_bitboard;
-            check_mask |= knights & KNIGHT_MOVES[king_square as usize];
+            println!("{}", current_square);
+        }
 
 
-            // pawns
-            let king_reaches = match self.turn {
-                Color::White => my_bitboard << Bitboard(7) | my_bitboard << Bitboard(9),
-                Color::Black => my_bitboard >> Bitboard(7) | my_bitboard >> Bitboard(9),
-            };
-            println!("{}", king_reaches);
-            check_mask |= king_reaches & (enemy_bitboard & self.board.by_role.pawns);
 
-            check_mask
-        };
-
-        println!("{}", check_mask);
-
-        unimplemented!("get_legal_moves");
     }
 
     pub fn from_fen(fen: &str) -> Game {
@@ -187,8 +133,8 @@ impl Game {
         Game {
             board: Board::from_fen(fen),
             turn: active_color,
-            white_castlinright: castlig_rights.0,
-            can_black_castle: castlig_rights.1,
+            white_castling_rights: castlig_rights.0,
+            black_castling_rights: castlig_rights.1,
             en_passant_target: en_passent_target,
             halfmove_clock,
             fullmoves,

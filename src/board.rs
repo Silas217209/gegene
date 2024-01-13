@@ -2,16 +2,18 @@ use crate::bitboard::Bitboard;
 use crate::piece::Piece;
 use crate::role::Role;
 use std::fmt::{Display, Formatter};
+use std::thread::current;
 use crate::lookup::bishop_mask::BISHOP_MASK;
 use crate::lookup::bishop_moves::BISHOP_MOVES;
 use crate::lookup::direction_mask::DIRECTION_MASK;
+use crate::lookup::king::KING_MOVES;
 use crate::lookup::knight::KNIGHT_MOVES;
 use crate::lookup::rook_mask::ROOK_MASK;
 use crate::lookup::rook_moves::ROOK_MOVES;
 use crate::pdep::Pdep;
 use crate::pext::Pext;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Color {
     White,
     Black,
@@ -223,11 +225,13 @@ impl Board {
         BISHOP_MOVES[index]
     }
 
-    pub fn check_mask(self, turn: Color) -> Bitboard {
+    pub fn check_mask(self, turn: Color) -> (Bitboard, i32) {
         let my_bitboard = match turn {
             Color::White => self.by_color.white,
             Color::Black => self.by_color.black,
         };
+
+        let mut count = 0;
 
         let enemy_bitboard = !my_bitboard & (self.by_color.white | self.by_color.black);
 
@@ -259,6 +263,7 @@ impl Board {
         for &direction in &[king_reaches_north, king_reaches_south, king_reaches_east, king_reaches_west] {
             let attack = direction & (rooks | queen);
             if attack != Bitboard(0) {
+                count += 1;
                 let attack_square = attack.0.trailing_zeros();
                 let attacker_moves = self.rook_attacks(attack_square as usize, blockers);
                 check_mask |= direction & (attacker_moves | Bitboard(1 << attack_square));
@@ -278,6 +283,7 @@ impl Board {
         for &direction in &[king_reaches_north_east, king_reaches_north_west, king_reaches_south_east, king_reaches_south_west] {
             let attack = direction & (bishops | queen);
             if attack != Bitboard(0) {
+                count += 1;
                 let attack_square = attack.0.trailing_zeros();
                 let attacker_moves = self.bishop_attacks(attack_square as usize, blockers);
                 check_mask |= direction & (attacker_moves | Bitboard(1 << attack_square));
@@ -292,28 +298,73 @@ impl Board {
             Color::Black => Bitboard(king_reaches.0.wrapping_shr(9)) | Bitboard(king_reaches.0.wrapping_shr(7)),
         };
 
+        let pawn_count = pawns.0.pext(king_reaches.0);
+
+        match pawn_count {
+            0b1 => {
+                count += 1;
+            }
+            0b11 => {
+                count += 2;
+            }
+            _ => {}
+        }
 
         check_mask |= king_reaches & pawns;
 
         // knights
         let knights = self.by_role.knights & enemy_bitboard;
         let king_reaches = KNIGHT_MOVES[king_square as usize];
+
+        let knight_count = knights.0.pext(king_reaches.0);
+
+        match knight_count {
+            0b1 => {
+                count += 1;
+            }
+            0b11 => {
+                count += 2;
+            }
+            0b111 => {
+                count += 3;
+            }
+            0b1111 => {
+                count += 4;
+            }
+            0b11111 => {
+                count += 5;
+            }
+            0b111111 => {
+                count += 6;
+            }
+            0b1111111 => {
+                count += 7;
+            }
+            0b11111111 => {
+                count += 8;
+            }
+            _ => {}
+        }
+
         check_mask |= king_reaches & knights;
 
-        check_mask
+        (check_mask, count)
     }
 
-    pub fn pin_mask(self, turn: Color) -> Bitboard {
+    pub fn pin_mask(self, turn: Color) -> (Bitboard, Bitboard) {
         let my_bitboard = match turn {
             Color::White => self.by_color.white,
             Color::Black => self.by_color.black,
         };
+//        let my_bitboard = Bitboard((Color::White == turn) as u64 * self.by_color.black.0 + (Color::Black == turn) as u64 * self.by_color.white.0);
+
         let my_bitboard_without_king = my_bitboard & !(self.by_role.kings & my_bitboard);
 
 
         let enemy_bitboard = !my_bitboard & (self.by_color.white | self.by_color.black);
 
-        let mut check_mask = Bitboard(0);
+        let mut pin_mask_vh = Bitboard(0);
+        let mut pin_mask_diagonal = Bitboard(0);
 
         let blockers = enemy_bitboard & !(self.by_role.kings & my_bitboard);
         let king_square = (my_bitboard & self.by_role.kings).0.trailing_zeros();
@@ -349,7 +400,7 @@ impl Board {
                     continue;
                 }
 
-                check_mask |= direction & (attacker_moves | Bitboard(1 << attack_square));
+                pin_mask_vh |= direction & (attacker_moves | Bitboard(1 << attack_square));
             }
         }
 
@@ -373,14 +424,65 @@ impl Board {
                     continue;
                 }
 
-                check_mask |= direction & (attacker_moves | Bitboard(1 << attack_square));
+                pin_mask_diagonal |= direction & (attacker_moves | Bitboard(1 << attack_square));
             }
         }
 
-        check_mask
+        (pin_mask_vh, pin_mask_diagonal)
     }
 
+    pub fn seen_by_enemy(self, turn: Color) -> Bitboard {
+        let mut bitboard = Bitboard(0);
 
+        let my_bitboard = match turn {
+            Color::White => self.by_color.white,
+            Color::Black => self.by_color.black,
+        };
+
+        let enemy_bitboard = !my_bitboard & (self.by_color.white | self.by_color.black);
+
+        let blockers = self.by_color.white | self.by_color.black;
+
+        for i in 0..64 {
+            let current_square = Bitboard(1 << i);
+
+            if current_square & enemy_bitboard == Bitboard(0) {
+                continue;
+            }
+
+            let is_queen = current_square & self.by_role.queens != Bitboard(0);
+            let is_rook = current_square & self.by_role.rooks != Bitboard(0);
+            let is_bishop = current_square & self.by_role.bishops != Bitboard(0);
+            let is_knight = current_square & self.by_role.knights != Bitboard(0);
+            let is_king = current_square & self.by_role.kings != Bitboard(0);
+            let is_pawn = current_square & self.by_role.pawns != Bitboard(0);
+
+            if is_rook {
+                let seen = self.rook_attacks(i as usize, blockers);
+                bitboard |= seen;
+            } else if is_bishop {
+                let seen = self.bishop_attacks(i as usize, blockers);
+                bitboard |= seen;
+            } else if is_queen {
+                let seen = self.rook_attacks(i as usize, blockers) | self.bishop_attacks(i as usize, blockers);
+                bitboard |= seen;
+            } else if is_knight {
+                let seen = KNIGHT_MOVES[i as usize];
+                bitboard |= seen;
+            } else if is_king {
+                let seen = KING_MOVES[i as usize];
+                bitboard |= seen;
+            } else if is_pawn {
+                let seen = match turn {
+                    Color::White => (Bitboard(current_square.0.wrapping_shr(9)) | Bitboard(current_square.0.wrapping_shr(7))) & Bitboard::from_rank(Rank::from_number(i / 8 - 1)),
+                    Color::Black => (Bitboard(current_square.0.wrapping_shl(9)) | Bitboard(current_square.0.wrapping_shl(7))) & Bitboard::from_rank(Rank::from_number(i / 8 + 1)),
+                };
+                bitboard |= seen;
+            }
+        }
+
+        bitboard & !enemy_bitboard
+    }
 }
 
 impl Display for Board {
