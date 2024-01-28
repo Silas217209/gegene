@@ -1,16 +1,16 @@
 use crate::board::{File, Rank};
-use std::{
-    fmt::write,
-    ops::{BitAnd, BitAndAssign, BitOrAssign, BitXorAssign}, slice::RChunks,
-};
-use std::num::Wrapping;
-use std::ops::{BitOr, BitXor, Not, Shl, Shr};
 use crate::pext::Pext;
 use crate::r#move::Square;
+use std::num::Wrapping;
+use std::ops::{Add, BitOr, BitXor, Mul, Not, Shl, Shr, Sub};
+use std::{
+    fmt::write,
+    ops::{BitAnd, BitAndAssign, BitOrAssign, BitXorAssign},
+    slice::RChunks,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bitboard(pub u64);
-
 
 // 56 57 58 59 60 61 62 63
 // 48 49 50 51 52 53 54 55
@@ -21,34 +21,33 @@ pub struct Bitboard(pub u64);
 // 08 09 10 11 12 13 14 15
 // 00 01 02 03 04 05 06 07
 impl Bitboard {
-    pub fn from_rank(rank: Rank) -> Bitboard {
-        match rank {
-            Rank::First => Bitboard(0x00_00_00_00_00_00_00_FF),
-            Rank::Second => Bitboard(0x00_00_00_00_00_00_FF_00),
-            Rank::Third => Bitboard(0x00_00_00_00_00_FF_00_00),
-            Rank::Fourth => Bitboard(0x00_00_00_00_FF_00_00_00),
-            Rank::Fifth => Bitboard(0x00_00_00_FF_00_00_00_00),
-            Rank::Sixth => Bitboard(0x00_00_FF_00_00_00_00_00),
-            Rank::Seventh => Bitboard(0x00_FF_00_00_00_00_00_00),
-            Rank::Eighth => Bitboard(0xFF_00_00_00_00_00_00_00),
-        }
+    pub fn from_rank_number(rank: usize) -> Bitboard {
+        const RANK_TABLE: [Bitboard; 8] = [
+            Bitboard(0x00_00_00_00_00_00_00_FF),
+            Bitboard(0x00_00_00_00_00_00_FF_00),
+            Bitboard(0x00_00_00_00_00_FF_00_00),
+            Bitboard(0x00_00_00_00_FF_00_00_00),
+            Bitboard(0x00_00_00_FF_00_00_00_00),
+            Bitboard(0x00_00_FF_00_00_00_00_00),
+            Bitboard(0x00_FF_00_00_00_00_00_00),
+            Bitboard(0xFF_00_00_00_00_00_00_00),
+        ];
+        RANK_TABLE[rank]
     }
 
-    pub fn from_file(file: File) -> Bitboard {
-        match file {
-            File::A => Bitboard(0x01_01_01_01_01_01_01_01),
-            File::B => Bitboard(0x02_02_02_02_02_02_02_02),
-            File::C => Bitboard(0x04_04_04_04_04_04_04_04),
-            File::D => Bitboard(0x08_08_08_08_08_08_08_08),
-            File::E => Bitboard(0x10_10_10_10_10_10_10_10),
-            File::F => Bitboard(0x20_20_20_20_20_20_20_20),
-            File::G => Bitboard(0x40_40_40_40_40_40_40_40),
-            File::H => Bitboard(0x80_80_80_80_80_80_80_80),
-        }
-    }
+    pub fn from_file_number(file: usize) -> Bitboard {
+        const FILE_TABLE: [Bitboard; 8] = [
+            Bitboard(0x01_01_01_01_01_01_01_01),
+            Bitboard(0x02_02_02_02_02_02_02_02),
+            Bitboard(0x04_04_04_04_04_04_04_04),
+            Bitboard(0x08_08_08_08_08_08_08_08),
+            Bitboard(0x10_10_10_10_10_10_10_10),
+            Bitboard(0x20_20_20_20_20_20_20_20),
+            Bitboard(0x40_40_40_40_40_40_40_40),
+            Bitboard(0x80_80_80_80_80_80_80_80),
+        ];
 
-    pub fn from_square(square: Square) -> Bitboard {
-        Bitboard::from_file(square.0) & Bitboard::from_rank(square.1)
+        FILE_TABLE[file]
     }
 }
 
@@ -118,6 +117,30 @@ impl Shl for Bitboard {
     }
 }
 
+impl Mul<u64> for Bitboard {
+    type Output = Bitboard;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        Bitboard(self.0 * rhs)
+    }
+}
+
+impl Add for Bitboard {
+    type Output = Bitboard;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 + rhs.0)
+    }
+}
+
+impl Sub<u64> for Bitboard {
+    type Output = Bitboard;
+
+    fn sub(self, rhs: u64) -> Self::Output {
+        Bitboard(self.0 - rhs)
+    }
+}
+
 impl std::fmt::Display for Bitboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for rank in (0..8).rev() {
@@ -135,4 +158,3 @@ impl std::fmt::Display for Bitboard {
         Ok(())
     }
 }
-

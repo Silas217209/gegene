@@ -1,21 +1,21 @@
 pub(crate) mod bishop_mask;
-pub(crate) mod rook_mask;
-pub(crate) mod king;
-pub(crate) mod knight;
-pub(crate) mod rook_moves;
 pub(crate) mod bishop_moves;
 pub(crate) mod direction_mask;
+pub(crate) mod king;
+pub(crate) mod knight;
+pub(crate) mod rook_mask;
+pub(crate) mod rook_moves;
 
 use crate::bitboard::Bitboard;
 use crate::board::{File, Rank};
+use crate::lookup::bishop_mask::BISHOP_MASK;
+use crate::lookup::rook_mask::ROOK_MASK;
 use crate::pdep::Pdep;
 use crate::pext::Pext;
 use std::collections::HashMap;
 use std::fs::File as Fil;
 use std::io::Write;
 use std::u16;
-use crate::lookup::bishop_mask::BISHOP_MASK;
-use crate::lookup::rook_mask::ROOK_MASK;
 
 pub fn generate_king_moves() -> std::io::Result<()> {
     let mut moves: [Bitboard; 64] = [Bitboard(0); 64];
@@ -149,11 +149,11 @@ pub fn generate_rook_mask() -> std::io::Result<()> {
         let rank_number = square / 8;
         let file_number = square % 8;
 
-        let rank = Bitboard::from_rank(Rank::from_number(rank_number));
-        let file = Bitboard::from_file(File::from_number(file_number));
+        let rank = Bitboard::from_rank_number(rank_number);
+        let file = Bitboard::from_file_number(file_number);
 
-        let excluded = (rank & (Bitboard::from_file(File::A) | Bitboard::from_file(File::H)))
-            | (file & (Bitboard::from_rank(Rank::First) | Bitboard::from_rank(Rank::Eighth)))
+        let excluded = (rank & (Bitboard::from_file_number(0) | Bitboard::from_file_number(7)))
+            | (file & (Bitboard::from_rank_number(0) | Bitboard::from_rank_number(7)))
             | Bitboard(1 << square);
 
         let mask = (rank | file) ^ excluded;
@@ -166,7 +166,7 @@ pub fn generate_rook_mask() -> std::io::Result<()> {
     writeln!(output, "use crate::bitboard::Bitboard;\n");
     writeln!(output, "pub const ROOK_MASK: [(Bitboard, u64); 64] = [");
     for mv in moves {
-        writeln!(output, "\t(Bitboard(0x{:x}), {}),", mv.0.0, mv.1);
+        writeln!(output, "\t(Bitboard(0x{:x}), {}),", mv.0 .0, mv.1);
     }
     writeln!(output, "];")
 }
@@ -227,7 +227,7 @@ pub fn generate_bishop_mask() -> std::io::Result<()> {
     writeln!(output, "use crate::bitboard::Bitboard;\n");
     writeln!(output, "pub const BISHOP_MASK: [(Bitboard, u64); 64] = [");
     for mv in moves {
-        writeln!(output, "\t(Bitboard(0x{:x}), {}),", mv.0.0, mv.1);
+        writeln!(output, "\t(Bitboard(0x{:x}), {}),", mv.0 .0, mv.1);
     }
     writeln!(output, "];")
 }
@@ -319,7 +319,11 @@ pub fn generate_rook_moves() -> std::io::Result<()> {
 
     let mut output = Fil::create("lookup/rook_moves.rs")?;
     writeln!(output, "use crate::bitboard::Bitboard;\n");
-    writeln!(output, "pub const ROOK_MOVES: [Bitboard; {}] = [", moves.len());
+    writeln!(
+        output,
+        "pub const ROOK_MOVES: [Bitboard; {}] = [",
+        moves.len()
+    );
     for mv in moves {
         writeln!(output, "\tBitboard(0x{:x}),", mv.0);
     }
@@ -332,7 +336,7 @@ pub fn generate_bishop_moves() -> std::io::Result<()> {
         let square = square as i32;
 
         let possibilities: u64 = 2u64.pow(mask.0.count_ones());
-        for i in 0..possibilities  {
+        for i in 0..possibilities {
             let mut bitboard = Bitboard(0);
             let blocker = Bitboard(i.pdep(mask.0));
 
@@ -405,7 +409,11 @@ pub fn generate_bishop_moves() -> std::io::Result<()> {
     }
     let mut output = Fil::create("lookup/bishop_moves.rs")?;
     writeln!(output, "use crate::bitboard::Bitboard;\n");
-    writeln!(output, "pub const BISHOP_MOVES: [Bitboard; {}] = [", moves.len());
+    writeln!(
+        output,
+        "pub const BISHOP_MOVES: [Bitboard; {}] = [",
+        moves.len()
+    );
     for mv in moves {
         writeln!(output, "\tBitboard(0x{:x}),", mv.0);
     }
@@ -413,7 +421,8 @@ pub fn generate_bishop_moves() -> std::io::Result<()> {
 }
 
 pub fn generate_ray_mask() -> std::io::Result<()> {
-    let mut moves: [(Bitboard, Bitboard, Bitboard, Bitboard); 64] = [(Bitboard(0), Bitboard(0), Bitboard(0), Bitboard(0)); 64];
+    let mut moves: [(Bitboard, Bitboard, Bitboard, Bitboard); 64] =
+        [(Bitboard(0), Bitboard(0), Bitboard(0), Bitboard(0)); 64];
 
     for square in 0..64 {
         let file = square % 8;
@@ -423,31 +432,46 @@ pub fn generate_ray_mask() -> std::io::Result<()> {
 
         let mut north_mask = Bitboard(0);
         for i in rank..8 {
-            north_mask |= Bitboard::from_rank(Rank::from_number(i));
+            north_mask |= Bitboard::from_rank_number(i);
         }
 
         let mut east_mask = Bitboard(0);
         for i in file..8 {
-            east_mask |= Bitboard::from_file(File::from_number(i));
+            east_mask |= Bitboard::from_file_number(i);
         }
 
         let mut south_mask = Bitboard(0);
         for i in 0..=rank {
-            south_mask |= Bitboard::from_rank(Rank::from_number(i));
+            south_mask |= Bitboard::from_rank_number(i);
         }
 
         let mut west_mask = Bitboard(0);
         for i in 0..=file {
-            west_mask |= Bitboard::from_file(File::from_number(i));
+            west_mask |= Bitboard::from_file_number(i);
         }
-        moves[square as usize] = (north_mask, east_mask, south_mask, west_mask);
+
+        if square == 22 {
+            println!("north mask:\n{}", north_mask);
+            println!("east mask:\n{}", east_mask);
+            println!("south mask:\n{}", south_mask);
+            println!("west mask:\n{}", west_mask);
+        }
+
+        moves[square] = (north_mask, east_mask, south_mask, west_mask);
     }
 
     let mut output = Fil::create("src/lookup/direction_mask.rs")?;
     writeln!(output, "use crate::bitboard::Bitboard;\n");
-    writeln!(output, "pub const BISHOP_MOVES: [(Bitboard, Bitboard, Bitboard, Bitboard); 64] = [");
+    writeln!(
+        output,
+        "pub const DIRECTION_MASK: [(Bitboard, Bitboard, Bitboard, Bitboard); 64] = ["
+    );
     for mv in moves {
-        writeln!(output, "\t(Bitboard(0x{:x}), Bitboard(0x{:x}), Bitboard(0x{:x}), Bitboard(0x{:x})),", mv.0.0, mv.1.0, mv.2.0, mv.3.0);
+        writeln!(
+            output,
+            "\t(Bitboard(0x{:x}), Bitboard(0x{:x}), Bitboard(0x{:x}), Bitboard(0x{:x})),",
+            mv.0 .0, mv.1 .0, mv.2 .0, mv.3 .0
+        );
     }
     writeln!(output, "];")
 }
