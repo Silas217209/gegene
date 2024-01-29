@@ -1,13 +1,7 @@
-use crate::board::{File, Rank};
-use crate::pext::Pext;
-use crate::r#move::Square;
-use std::num::Wrapping;
+use duplicate::duplicate_item;
+
 use std::ops::{Add, BitOr, BitXor, Mul, Not, Shl, Shr, Sub};
-use std::{
-    fmt::write,
-    ops::{BitAnd, BitAndAssign, BitOrAssign, BitXorAssign},
-    slice::RChunks,
-};
+use std::ops::{BitAnd, BitAndAssign, BitOrAssign, BitXorAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bitboard(pub u64);
@@ -138,6 +132,23 @@ impl Sub<u64> for Bitboard {
 
     fn sub(self, rhs: u64) -> Self::Output {
         Bitboard(self.0 - rhs)
+    }
+}
+
+#[duplicate_item(int_type; [u8]; [u16]; [u32]; [u64]; [u128]; [usize]; [i8]; [i16]; [i32]; [i64])]
+impl Shl<int_type> for Bitboard {
+    type Output = Bitboard;
+
+    fn shl(self, rhs: int_type) -> Self::Output {
+        Bitboard(self.0 >> rhs)
+    }
+}
+#[duplicate_item(int_type; [u8]; [u16]; [u32]; [u64]; [u128]; [usize]; [i8]; [i16]; [i32]; [i64])]
+impl Shr<int_type> for Bitboard {
+    type Output = Bitboard;
+
+    fn shr(self, rhs: int_type) -> Self::Output {
+        Bitboard(self.0 << rhs)
     }
 }
 

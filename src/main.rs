@@ -1,27 +1,25 @@
 use crate::{board::Color, game::Game};
+use num_format::{Locale, ToFormattedString};
 
 mod bitboard;
 mod board;
 mod game;
 mod lookup;
-mod r#move;
+pub mod r#move;
 mod pdep;
 mod pext;
 mod piece;
 mod role;
 
 fn main() {
-    let fen = "8/8/8/2k5/3Pp3/8/8/4K3 b - d4 0 1";
-    let game = Game::from_fen(fen);
+    let fen = "1k6/8/8/8/3Pp3/8/8/1K6 b - d3 0 1";
+    let game = Game::from_fen(fen).expect("invalid FEN");
 
-    println!("board: \n{}", game.board);
-    println!("pin mask: \n{}", game.board.pin_mask(Color::Black));
-    println!(
-        "check move mask: \n{}",
-        game.board.check_mask(Color::Black).0
-    );
-    println!(
-        "check capture mask: \n{}",
-        game.board.check_mask(Color::Black).1
-    );
+    let start = std::time::Instant::now();
+    let (nodes, en_pasaant) = game.perft(4);
+    let duration = start.elapsed();
+
+    println!("Perft(2) = {}", nodes);
+    println!("Perft(2) = {}", en_pasaant);
+    println!("Nodes/s: {}", (nodes as u128 / duration.as_millis() * 1000).to_formatted_string(&Locale::fr));
 }

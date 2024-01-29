@@ -241,6 +241,40 @@ impl Board {
         }
     }
 
+    pub fn update_bitboard(&mut self, piece: Piece, from_square: Bitboard, to_square: Bitboard) {
+        let move_bitboard = from_square | to_square;
+
+        match piece.role {
+            Role::Pawn => {
+                self.by_role.pawns ^= move_bitboard;
+            }
+            Role::Bishop => {
+                self.by_role.bishops ^= move_bitboard;
+            }
+            Role::Knight => {
+                self.by_role.knights ^= move_bitboard;
+            }
+            Role::Rook => {
+                self.by_role.rooks ^= move_bitboard;
+            }
+            Role::Queen => {
+                self.by_role.queens ^= move_bitboard;
+            }
+            Role::King => {
+                self.by_role.kings ^= move_bitboard;
+            }
+        }
+
+        match piece.color {
+            Color::White => {
+                self.by_color.white ^= move_bitboard;
+            },
+                Color::Black => {
+                self.by_color.black ^= move_bitboard;
+            }
+        }
+    }
+
     #[inline]
     pub fn rook_attacks(&self, square: usize, blockers: Bitboard) -> Bitboard {
         let (mask, offset) = ROOK_MASK[square];
@@ -261,7 +295,9 @@ impl Board {
             Color::Black => self.by_color.black,
         };
 
-        let enemy_bitboard = !my_bitboard & (self.by_color.white | self.by_color.black);
+        let all_pieces = self.by_color.white | self.by_color.black;
+
+        let enemy_bitboard = !my_bitboard & all_pieces;
 
         let king_square = Square((my_bitboard & self.by_role.kings).0.trailing_zeros() as u8);
         if king_square.0 > 63 {
@@ -270,8 +306,7 @@ impl Board {
         let mut capture_mask = Bitboard(0);
         let mut move_mask = Bitboard(0);
 
-        let blockers =
-            (self.by_color.white | self.by_color.black) & !(self.by_role.kings & my_bitboard);
+        let blockers = all_pieces & !(self.by_role.kings & my_bitboard);
 
         // rook moves
         let rooks = self.by_role.rooks & enemy_bitboard;
@@ -472,7 +507,7 @@ impl Board {
 
     pub fn seen_by_enemy(self, turn: Color) -> Bitboard {
         let mut bitboard = Bitboard(0);
-        let mut all_pieces = self.by_color.white | self.by_color.black;
+        let all_pieces = self.by_color.white | self.by_color.black;
 
         let my_bitboard = match turn {
             Color::White => self.by_color.white,
@@ -480,8 +515,8 @@ impl Board {
         };
 
         let enemy_bitboard = !my_bitboard & (all_pieces);
-
-        let blockers = all_pieces;
+        let king = self.by_role.kings & my_bitboard;
+        let blockers = all_pieces & !king;
 
         for i in 0..64 {
             let current_square = Bitboard(1 << i);

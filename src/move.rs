@@ -1,3 +1,5 @@
+use std::str;
+
 use crate::board::{File, Rank};
 use crate::piece::Piece;
 use crate::role::Role;
@@ -6,8 +8,20 @@ use crate::role::Role;
 pub struct Square(pub u8);
 
 impl Square {
-    pub fn from_algebraic(algebraic: &str) -> Square {
-        let file = match algebraic.chars().nth(0).unwrap() {
+    pub fn from_algebraic(algebraic: &str) -> Result<Square, &str> {
+        if algebraic.len() != 2 {
+            return Err("The input should have a lenght of exactly 2");
+        }
+        let first_char = algebraic.chars().nth(0);
+
+        if first_char.is_none() {
+            return Err("square string is invalid (first char)");
+        }
+        let second_char = algebraic.chars().nth(1);
+        if second_char.is_none() {
+            return Err("square string is invalid (second char)");
+        }
+        let file = match first_char.unwrap() {
             'a' => File::A,
             'b' => File::B,
             'c' => File::C,
@@ -16,10 +30,10 @@ impl Square {
             'f' => File::F,
             'g' => File::G,
             'h' => File::H,
-            _ => panic!("Invalid file"),
+            _ => return Err("invalid File"),
         };
 
-        let rank = match algebraic.chars().nth(1).unwrap() {
+        let rank = match second_char.unwrap() {
             '1' => Rank::First,
             '2' => Rank::Second,
             '3' => Rank::Third,
@@ -28,16 +42,16 @@ impl Square {
             '6' => Rank::Sixth,
             '7' => Rank::Seventh,
             '8' => Rank::Eighth,
-            _ => panic!("Invalid rank"),
+            _ => return Err("invalid Rank"),
         };
 
-        Square((rank as u8) * 8 + (file as u8))
+        Ok(Square((rank as u8) * 8 + (file as u8)))
     }
-    
+
     pub fn file(&self) -> u8 {
-        self.0 % 8 
+        self.0 % 8
     }
-    
+
     pub fn rank(&self) -> u8 {
         self.0 / 8
     }
@@ -47,7 +61,7 @@ pub enum MoveType {
     Quiet,
     KingSideCastle,
     QueenSideCastle,
-    EnPassant,
+    EnPassant(Square),
     Promotion(Role),
 }
 

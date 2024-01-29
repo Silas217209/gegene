@@ -9,3 +9,7 @@ criterion = "0.5.1"
 [[bench]]
 name = "my_benchmark"
 harness = false
+
+[dependencies]
+duplicate = "1.0.0"
+num-format = "0.4.4"

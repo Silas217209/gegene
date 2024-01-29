@@ -1,5 +1,3 @@
-use std::{i32, usize};
-
 use crate::bitboard::Bitboard;
 use crate::lookup::king::KING_MOVES;
 use crate::lookup::knight::KNIGHT_MOVES;
@@ -10,6 +8,7 @@ use crate::{
     board::{Board, Color},
     r#move::{Move, Square},
 };
+use std::{i32, usize};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CastlingRight {
@@ -36,6 +35,29 @@ pub struct Game {
 }
 
 impl Game {
+    pub fn perft(&self, depth: u32) -> (u64, u64) {
+        if depth == 0 {
+            return (1, 0);
+        }
+
+        let mut nodes = 0;
+        let mut en_passant_moves = 0;
+        let (legal_moves, count) = self.get_legal_moves();
+        for i in 0..count {
+            let mut game = *self;
+            game.play(legal_moves[i]);
+            let (child_nodes, child_en_passant_moves) = game.perft(depth - 1);
+            nodes += child_nodes;
+            en_passant_moves += child_en_passant_moves;
+
+            // Check if the current move is an en passant move
+            if let MoveType::EnPassant(_) = legal_moves[i].move_type {
+                en_passant_moves += 1;
+            }
+        }
+
+        (nodes, en_passant_moves)
+    }
     pub fn get_legal_moves(self) -> ([Move; 218], usize) {
         let mut index = 0;
         let mut moves: [Move; 218] = [Move {
@@ -66,7 +88,7 @@ impl Game {
         let (move_mask, capture_mask) = self.board.check_mask(self.turn);
 
         // only the king can move if there is a check by more than one enemy piece
-        if capture_mask.0.count_ones() > 1 {
+        if capture_mask.0.count_ones() > 1 && capture_mask.0.count_zeros() > 0 {
             let king_bitboard = self.board.by_role.kings & my_bitboard;
             let king_square = king_bitboard.0.trailing_zeros() as usize;
             let mut king_moves = KING_MOVES[king_square];
@@ -155,20 +177,6 @@ impl Game {
                         r &= one_rank_up;
                     }
 
-                    // en passant
-                    if let Some(en_passant_target) = self.en_passant_target {
-                        let en_passant_square = Bitboard((i << en_passant_target.0) as u64)
-                            & enemy_bitboard
-                            & capture_mask;
-
-                        // check if one of my pawns can capture the en passant target
-                        let en_passant_attackers = (en_passant_square << Bitboard(1)
-                            | en_passant_square >> Bitboard(1))
-                            & Bitboard::from_rank_number(3)
-                            & self.board.by_role.pawns
-                            & my_bitboard;
-                    }
-
                     r
                 } else {
                     let mut r = Bitboard(0);
@@ -183,6 +191,86 @@ impl Game {
                     }
                     r
                 };
+
+                // en passant
+                if let Some(en_passant_target) = self.en_passant_target {
+                    let en_passant_square =
+                        Bitboard((1 << en_passant_target.0) as u64) & enemy_bitboard;
+
+                    // check if one of my pawns can capture the en passant target
+                    let en_passant_attackers =
+                        en_passant_square << Bitboard(1) | en_passant_square >> Bitboard(1);
+
+                    let en_passant_rank = match self.turn {
+                        Color::White => Bitboard::from_rank_number(4),
+                        Color::Black => Bitboard::from_rank_number(3),
+                    }; // filters out overshifted values
+
+                    let en_passant_attackers = en_passant_attackers
+                        & en_passant_rank
+                        & self.board.by_role.pawns
+                        & my_bitboard;
+
+                    // get target square
+                    let target_square: Bitboard = match self.turn {
+                        Color::White => en_passant_square >> 8,
+                        Color::Black => en_passant_square << 8,
+                    };
+
+                    println!("en passant attackers: \n{}", en_passant_attackers);
+                    println!("en passant square: \n{}", en_passant_square);
+                    println!("en passant target: \n{}", en_passant_target.0);
+
+                    // add id directly to the move list
+                    let attacker1 = en_passant_attackers.0.trailing_zeros();
+                    let move1 = Move {
+                        from: Square(attacker1 as u8),
+                        to: Square(target_square.0.trailing_zeros() as u8),
+                        piece: Piece {
+                            role: Role::Pawn,
+                            color: self.turn,
+                        },
+                        capture: Option::from(Piece {
+                            color: match self.turn {
+                                Color::White => Color::Black,
+                                Color::Black => Color::White,
+                            },
+                            role: Role::Pawn,
+                        }),
+                        move_type: MoveType::EnPassant(Square(
+                            en_passant_square.0.trailing_zeros() as u8,
+                        )),
+                    };
+
+                    moves[index] = move1;
+                    index += 1;
+
+                    if en_passant_attackers.0.count_ones() > 1 {
+                        let attacker2 = 64 - en_passant_attackers.0.leading_ones();
+
+                        let move2 = Move {
+                            from: Square(attacker2 as u8),
+                            to: Square(target_square.0.trailing_zeros() as u8),
+                            piece: Piece {
+                                role: Role::Pawn,
+                                color: self.turn,
+                            },
+                            capture: Option::from(Piece {
+                                color: match self.turn {
+                                    Color::White => Color::Black,
+                                    Color::Black => Color::White,
+                                },
+                                role: Role::Pawn,
+                            }),
+                            move_type: MoveType::EnPassant(Square(
+                                en_passant_square.0.trailing_zeros() as u8,
+                            )),
+                        };
+
+                        moves[index] = move2;
+                        index += 1;
+                    }
+                }
 
                 // remove captures with no enemy to capture
                 pawn_captures &= enemy_bitboard;
@@ -212,7 +300,12 @@ impl Game {
                 moves_bitboard = (self.board.bishop_attacks(i, blockers)
                     | self.board.rook_attacks(i, blockers))
                     & (move_mask | capture_mask);
-            }
+            } else if self.board.by_role.kings & current_square != Bitboard(0) {
+                let mut king_moves = KING_MOVES[i];
+                king_moves &= !seen_by_enemy;
+
+                moves_bitboard |= king_moves;
+            };
 
             moves_bitboard &= pin_mask | Bitboard((is_pinned as u64).wrapping_sub(1));
 
@@ -274,9 +367,9 @@ impl Game {
 
         if self.white_castling_rights.king_side
             && (kingside_castle_without_king
-                & (self.board.by_color.black | self.board.by_color.white)
-                == Bitboard(0)
-                && kingside_castle_mask & seen_by_enemy == Bitboard(0))
+            & (self.board.by_color.black | self.board.by_color.white)
+            == Bitboard(0)
+            && kingside_castle_mask & seen_by_enemy == Bitboard(0))
         {
             moves[index] = Move {
                 from: Square(4),
@@ -293,9 +386,9 @@ impl Game {
 
         if self.white_castling_rights.queen_side
             && (queenside_castle_mask_without_king
-                & (self.board.by_color.black | self.board.by_color.white)
-                == Bitboard(0)
-                && queenside_castle_mask & seen_by_enemy == Bitboard(0))
+            & (self.board.by_color.black | self.board.by_color.white)
+            == Bitboard(0)
+            && queenside_castle_mask & seen_by_enemy == Bitboard(0))
         {
             moves[index] = Move {
                 from: Square(4),
@@ -313,7 +406,104 @@ impl Game {
         return (moves, index);
     }
 
-    pub fn from_fen(fen: &str) -> Game {
+    pub fn play(&mut self, played_move: Move) {
+        let from_square = Bitboard(1 << played_move.from.0 as u64);
+        let to_square = Bitboard(1 << played_move.to.0 as u64);
+
+        // update biboards
+        match played_move.move_type {
+            MoveType::Quiet => {
+                self.board
+                    .update_bitboard(played_move.piece, from_square, to_square)
+            }
+            MoveType::KingSideCastle => {
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: Role::Rook,
+                    },
+                    Bitboard(0b10000000),
+                    Bitboard(0b100000),
+                );
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: Role::King,
+                    },
+                    Bitboard(0b10000),
+                    Bitboard(0b1000000),
+                );
+            }
+            MoveType::QueenSideCastle => {
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: Role::Rook,
+                    },
+                    Bitboard(0b1),
+                    Bitboard(0b1000),
+                );
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: Role::King,
+                    },
+                    Bitboard(0b10000),
+                    Bitboard(0b100),
+                );
+            }
+            MoveType::EnPassant(en_passant_square) => {
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: Role::Pawn,
+                    },
+                    from_square,
+                    to_square,
+                );
+                self.board.update_bitboard(
+                    Piece {
+                        color: match self.turn {
+                            Color::White => Color::Black,
+                            Color::Black => Color::White,
+                        },
+                        role: Role::Pawn,
+                    },
+                    Bitboard(1 << en_passant_square.0),
+                    Bitboard(1 << en_passant_square.0),
+                );
+            }
+            MoveType::Promotion(piece_type) => {
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: Role::Pawn,
+                    },
+                    from_square,
+                    from_square,
+                );
+                self.board.update_bitboard(
+                    Piece {
+                        color: self.turn,
+                        role: piece_type,
+                    },
+                    to_square,
+                    to_square,
+                );
+            }
+        }
+
+        if let Some(capture) = played_move.capture {
+            self.board.update_bitboard(capture, to_square, to_square);
+        }
+
+        self.turn = match self.turn {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        }
+    }
+
+    pub fn from_fen(fen: &str) -> Result<Game, &str> {
         // we only care about the information after the position
         let fen_info: Vec<&str> = fen.trim().split(" ").collect();
         let fen_info = &fen_info[1..];
@@ -351,11 +541,12 @@ impl Game {
         };
 
         let en_passant_target = fen_info[2];
-        let en_passent_target: Option<Square> = {
-            if en_passant_target == "-" {
-                None
-            } else {
-                Some(Square::from_algebraic(en_passant_target))
+        let en_passent_target = if en_passant_target == "-" {
+            None
+        } else {
+            match Square::from_algebraic(en_passant_target) {
+                Ok(square) => Some(square),
+                Err(e) => return Err(e),
             }
         };
 
@@ -377,7 +568,7 @@ impl Game {
             }
         };
 
-        Game {
+        Ok(Game {
             board: Board::from_fen(fen),
             turn: active_color,
             white_castling_rights: castlig_rights.0,
@@ -386,6 +577,6 @@ impl Game {
             halfmove_clock,
             fullmoves,
             outcome: Outcome::Draw,
-        }
+        })
     }
 }
