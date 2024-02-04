@@ -268,8 +268,8 @@ impl Board {
         match piece.color {
             Color::White => {
                 self.by_color.white ^= move_bitboard;
-            },
-                Color::Black => {
+            }
+            Color::Black => {
                 self.by_color.black ^= move_bitboard;
             }
         }
@@ -287,6 +287,27 @@ impl Board {
         let (mask, offset) = BISHOP_MASK[square];
         let index = (blockers.0.pext(mask.0) + offset) as usize;
         BISHOP_MOVES[index]
+    }
+    #[inline]
+    pub fn pawn_attacks(self, color: Color, square: Square) -> Bitboard {
+        let square_bitboard = Bitboard(1u64 << square.0);
+
+        let rank1 = Bitboard::from_rank_number(0);
+        println!(
+            "{}",
+            Bitboard(rank1.0.wrapping_shl((8 * (square.rank() - 1)) as u32))
+        );
+
+        match color {
+            Color::White => {
+                (square_bitboard >> 7 | square_bitboard >> 9)
+                    & Bitboard(rank1.0.wrapping_shl((8 * (square.rank() + 1)) as u32))
+            }
+            Color::Black => {
+                (square_bitboard << 7 | square_bitboard << 9)
+                    & Bitboard(rank1.0.wrapping_shl((8 * (square.rank() - 1)) as u32))
+            }
+        }
     }
 
     pub fn check_mask(self, turn: Color) -> (Bitboard, Bitboard) {

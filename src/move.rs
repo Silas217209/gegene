@@ -1,3 +1,4 @@
+use std::fmt::{Display, Write};
 use std::str;
 
 use crate::board::{File, Rank};
@@ -55,12 +56,29 @@ impl Square {
     pub fn rank(&self) -> u8 {
         self.0 / 8
     }
+
+    pub fn to_algebraic(self) -> String {
+        let rank = (self.rank() + 49) as char ;
+        let file = (self.file() + 97) as char;
+
+        return format!("{file}{rank}");
+    }
+}
+
+impl Display for Square {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.to_algebraic().as_str())
+    }
 }
 #[derive(Debug, Copy, Clone)]
 pub enum MoveType {
     Quiet,
-    KingSideCastle,
-    QueenSideCastle,
+    DoublePawnPush,
+    KingSideCastleWhite,
+    KingSideCastleBlack,
+    QueenSideCastleWhite,
+    QueenSideCastleBlack,
     EnPassant(Square),
     Promotion(Role),
 }
@@ -72,4 +90,10 @@ pub struct Move {
     pub piece: Piece,
     pub capture: Option<Piece>,
     pub move_type: MoveType,
+}
+
+impl Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}{}", self.from.to_algebraic(), self.to.to_algebraic()))
+    }
 }
