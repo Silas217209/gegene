@@ -1,4 +1,3 @@
-use crate::bitboard::Bitboard;
 use crate::lookup::bishop_mask::BISHOP_MASK;
 use crate::lookup::bishop_moves::BISHOP_MOVES;
 use crate::lookup::direction_mask::DIRECTION_MASK;
@@ -8,8 +7,9 @@ use crate::lookup::rook_mask::ROOK_MASK;
 use crate::lookup::rook_moves::ROOK_MOVES;
 use crate::pext::Pext;
 use crate::piece::Piece;
-use crate::r#move::Square;
+use crate::r#move::{MoveType, Square};
 use crate::role::Role;
+use crate::{bitboard::Bitboard, r#move::Move};
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -293,11 +293,6 @@ impl Board {
         let square_bitboard = Bitboard(1u64 << square.0);
 
         let rank1 = Bitboard::from_rank_number(0);
-        println!(
-            "{}",
-            Bitboard(rank1.0.wrapping_shl((8 * (square.rank() - 1)) as u32))
-        );
-
         match color {
             Color::White => {
                 (square_bitboard >> 7 | square_bitboard >> 9)
@@ -308,6 +303,79 @@ impl Board {
                     & Bitboard(rank1.0.wrapping_shl((8 * (square.rank() - 1)) as u32))
             }
         }
+    }
+
+    #[inline]
+    pub fn get_en_passant_moves(self, en_passant_target: Square, turn: Color) -> Vec<Move> {
+        let mut moves: Vec<Move> = Vec::new();
+        let en_passant_attackers = self.pawn_attacks(
+            match turn {
+                Color::White => Color::Black,
+                Color::Black => Color::White,
+            },
+            en_passant_target,
+        );
+
+        let my_bitboard = match turn {
+            Color::White => self.by_color.white,
+            Color::Black => self.by_color.black,
+        };
+
+        let en_passant_attackers = en_passant_attackers & my_bitboard & self.by_role.pawns;
+
+        if en_passant_attackers.0.count_ones() == 0 {
+            return moves;
+        }
+        let en_passant_square = match turn {
+            Color::White => Square(en_passant_target.0 - 8),
+            Color::Black => Square(en_passant_target.0 + 8),
+        };
+
+        let attacker = en_passant_attackers.0.trailing_zeros();
+        let move1 = Move {
+            from: Square(attacker as u8),
+            to: en_passant_target,
+            piece: Piece {
+                role: Role::Pawn,
+                color: turn,
+            },
+            capture: Option::from(Piece {
+                color: match turn {
+                    Color::White => Color::Black,
+                    Color::Black => Color::White,
+                },
+                role: Role::Pawn,
+            }),
+            move_type: MoveType::EnPassant(en_passant_square),
+        };
+
+        moves.push(move1);
+
+        if en_passant_attackers.0.count_ones() > 1 {
+            return moves;
+        }
+
+        let attacker = 64 - en_passant_attackers.0.leading_zeros();
+        let move1 = Move {
+            from: Square(attacker as u8),
+            to: en_passant_target,
+            piece: Piece {
+                role: Role::Pawn,
+                color: turn,
+            },
+            capture: Option::from(Piece {
+                color: match turn {
+                    Color::White => Color::Black,
+                    Color::Black => Color::White,
+                },
+                role: Role::Pawn,
+            }),
+            move_type: MoveType::EnPassant(en_passant_square),
+        };
+
+        moves.push(move1);
+
+        moves
     }
 
     pub fn check_mask(self, turn: Color) -> (Bitboard, Bitboard) {
@@ -585,7 +653,7 @@ impl Board {
             }
         }
 
-        bitboard & !enemy_bitboard
+        bitboard
     }
 }
 

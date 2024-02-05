@@ -175,71 +175,6 @@ impl Game {
 
                 let mut pawn_attacks = self.board.pawn_attacks(self.turn, Square(i as u8));
 
-                // en passant
-                if let Some(en_passant_target) = self.en_passant_target {
-                    let en_passant_attackers = self.board.pawn_attacks(
-                        match self.turn {
-                            Color::White => Color::Black,
-                            Color::Black => Color::White,
-                        },
-                        en_passant_target,
-                    );
-
-                    let en_passant_attackers =
-                        en_passant_attackers & my_bitboard & self.board.by_role.pawns;
-
-                    if en_passant_attackers.0.count_ones() != 0 {
-                        let en_passant_square = match self.turn {
-                            Color::White => Square(en_passant_target.0 - 8),
-                            Color::Black => Square(en_passant_target.0 + 8),
-                        };
-
-                        let attacker = en_passant_attackers.0.trailing_zeros();
-                        let move1 = Move {
-                            from: Square(attacker as u8),
-                            to: en_passant_target,
-                            piece: Piece {
-                                role: Role::Pawn,
-                                color: self.turn,
-                            },
-                            capture: Option::from(Piece {
-                                color: match self.turn {
-                                    Color::White => Color::Black,
-                                    Color::Black => Color::White,
-                                },
-                                role: Role::Pawn,
-                            }),
-                            move_type: MoveType::EnPassant(en_passant_square),
-                        };
-
-                        moves[index] = move1;
-                        index += 1;
-
-                        if en_passant_attackers.0.count_ones() > 1 {
-                            let attacker = 64 - en_passant_attackers.0.leading_zeros();
-                            let move1 = Move {
-                                from: Square(attacker as u8),
-                                to: en_passant_target,
-                                piece: Piece {
-                                    role: Role::Pawn,
-                                    color: self.turn,
-                                },
-                                capture: Option::from(Piece {
-                                    color: match self.turn {
-                                        Color::White => Color::Black,
-                                        Color::Black => Color::White,
-                                    },
-                                    role: Role::Pawn,
-                                }),
-                                move_type: MoveType::EnPassant(en_passant_square),
-                            };
-
-                            moves[index] = move1;
-                            index += 1;
-                        }
-                    }
-                }
-
                 // remove captures with no enemy to capture
                 pawn_attacks &= enemy_bitboard;
 
@@ -275,11 +210,11 @@ impl Game {
                 moves_bitboard |= king_moves;
             };
 
-            moves_bitboard &= pin_mask | Bitboard((is_pinned as u64).wrapping_sub(1));
-
             moves_bitboard &= enemy_or_empty;
-            all_moves_bitboard |= moves_bitboard;
-
+            if is_pinned {
+                moves_bitboard &= pin_mask;
+            }
+        
             for square in 0..64 {
                 let current_square = Bitboard(1 << square);
 
@@ -417,6 +352,101 @@ impl Game {
             index += 1;
         }
 
+        // en passant
+        if let Some(en_passant_target) = self.en_passant_target {
+            let en_passant_attackers = self.board.pawn_attacks(
+                match self.turn {
+                    Color::White => Color::Black,
+                    Color::Black => Color::White,
+                },
+                en_passant_target,
+            ) & my_bitboard
+                & self.board.by_role.pawns;
+
+
+            let en_passant_square = match self.turn {
+                Color::White => Square(en_passant_target.0 - 8),
+                Color::Black => Square(en_passant_target.0 + 8),
+            };
+
+            let en_passant_rank: Bitboard = match self.turn {
+                Color::White => Bitboard::from_rank_number(4),
+                Color::Black => Bitboard::from_rank_number(3),
+            };
+
+
+            let en_passant_piece_bitboard = Bitboard(1 << en_passant_square.0);
+
+            let my_king = self.board.by_role.kings & my_bitboard;
+
+            if en_passant_attackers.0.count_ones() == 0 {
+                return (moves, index);
+            }
+
+            let king_blockers = (my_bitboard | enemy_bitboard)
+                & !(en_passant_piece_bitboard | en_passant_attackers);
+
+            let king_reaches = self
+                .board
+                .rook_attacks(my_king.0.trailing_zeros() as usize, king_blockers)
+                & en_passant_rank;
+
+            let is_discovered_check = king_reaches
+                & ((self.board.by_role.queens | self.board.by_role.rooks) & enemy_bitboard)
+                != Bitboard(0);
+
+            // discovered check is only one attacker
+            if is_discovered_check && en_passant_attackers.0.count_ones() == 1{
+                return (moves, index);
+            }
+
+
+            let attacker = en_passant_attackers.0.trailing_zeros();
+            let move1 = Move {
+                from: Square(attacker as u8),
+                to: en_passant_target,
+                piece: Piece {
+                    role: Role::Pawn,
+                    color: self.turn,
+                },
+                capture: Option::from(Piece {
+                    color: match self.turn {
+                        Color::White => Color::Black,
+                        Color::Black => Color::White,
+                    },
+                    role: Role::Pawn,
+                }),
+                move_type: MoveType::EnPassant(en_passant_square),
+            };
+
+            moves[index] = move1;
+            index += 1;
+
+            if en_passant_attackers.0.count_ones() == 1 {
+                return (moves, index);
+            }
+            let attacker = 64 - en_passant_attackers.0.leading_zeros();
+            let move1 = Move {
+                from: Square(attacker as u8),
+                to: en_passant_target,
+                piece: Piece {
+                    role: Role::Pawn,
+                    color: self.turn,
+                },
+                capture: Option::from(Piece {
+                    color: match self.turn {
+                        Color::White => Color::Black,
+                        Color::Black => Color::White,
+                    },
+                    role: Role::Pawn,
+                }),
+                move_type: MoveType::EnPassant(en_passant_square),
+            };
+
+            moves[index] = move1;
+            index += 1;
+        }
+
         return (moves, index);
     }
 
@@ -451,6 +481,7 @@ impl Game {
                 );
 
                 self.white_castling_rights.king_side = false;
+                self.white_castling_rights.queen_side = false;
             }
             MoveType::QueenSideCastleWhite => {
                 self.board.update_bitboard(
@@ -470,6 +501,7 @@ impl Game {
                     Bitboard(0b100),
                 );
                 self.white_castling_rights.queen_side = false;
+                self.white_castling_rights.king_side = false;
             }
             MoveType::KingSideCastleBlack => {
                 self.board.update_bitboard(
@@ -490,6 +522,7 @@ impl Game {
                 );
 
                 self.black_castling_rights.king_side = false;
+                self.black_castling_rights.queen_side = false;
             }
 
             MoveType::QueenSideCastleBlack => {
@@ -510,6 +543,7 @@ impl Game {
                     Bitboard(0b10000000000000000000000000000000000000000000000000000000000),
                 );
                 self.black_castling_rights.queen_side = false;
+                self.black_castling_rights.king_side = false;
             }
 
             MoveType::EnPassant(en_passant_square) => {
