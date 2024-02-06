@@ -58,7 +58,7 @@ impl Square {
     }
 
     pub fn to_algebraic(self) -> String {
-        let rank = (self.rank() + 49) as char ;
+        let rank = (self.rank() + 49) as char;
         let file = (self.file() + 97) as char;
 
         return format!("{file}{rank}");
@@ -66,7 +66,6 @@ impl Square {
 }
 
 impl Display for Square {
-
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.to_algebraic().as_str())
     }
@@ -92,8 +91,32 @@ pub struct Move {
     pub move_type: MoveType,
 }
 
+impl Move {
+    pub fn to_algebraic(self) -> String {
+        let from = self.from.to_algebraic();
+        let to = self.to.to_algebraic();
+
+        let mut result = String::new();
+
+        result.push_str(from.as_str());
+        result.push_str(to.as_str());
+
+        match self.move_type {
+            MoveType::Promotion(role) => match role {
+                Role::Queen => result.push('q'),
+                Role::Rook => result.push('r'),
+                Role::Bishop => result.push('b'),
+                Role::Knight => result.push('n'),
+                _ => {}
+            },
+            _ => {}
+        }
+
+        result
+    }
+}
 impl Display for Move {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}{}", self.from.to_algebraic(), self.to.to_algebraic()))
+        f.write_str(self.to_algebraic().as_str())
     }
 }

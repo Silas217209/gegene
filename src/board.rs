@@ -418,8 +418,7 @@ impl Board {
         let king_reaches_east = Bitboard(
             Bitboard::from_rank_number(king_square.rank() as usize)
                 .0
-                .wrapping_shl(king_square.file() as u32)
-                + 1,
+                .wrapping_shl(king_square.file() as u32),
         ) & king_reaches;
         let king_reaches_east = king_reaches_east & horizontal_mask;
 
@@ -471,11 +470,7 @@ impl Board {
 
         // pawns
         let pawns = self.by_role.pawns & enemy_bitboard;
-        let king_reaches = my_bitboard & self.by_role.kings;
-        let king_reaches = Bitboard(king_reaches.0.wrapping_shl(9))
-            | Bitboard(king_reaches.0.wrapping_shl(7)) * (turn == Color::White) as u64
-                + Bitboard(king_reaches.0.wrapping_shr(9))
-            | Bitboard(king_reaches.0.wrapping_shr(7)) * (turn == Color::Black) as u64;
+        let king_reaches = self.pawn_attacks(turn, king_square);
 
         capture_mask |= king_reaches & pawns;
 
@@ -490,7 +485,7 @@ impl Board {
         (move_mask, capture_mask)
     }
 
-    pub fn pin_mask(self, turn: Color) -> Bitboard {
+    pub fn pin_mask(self, turn: Color) -> (Bitboard, Bitboard) {
         let all_pieces = self.by_color.white | self.by_color.black;
         let my_bitboard = match turn {
             Color::White => self.by_color.white,
@@ -501,14 +496,16 @@ impl Board {
 
         let enemy_bitboard = !my_bitboard & (all_pieces);
 
-        let mut pin_mask = Bitboard(0);
+        let mut pin_mask_vh = Bitboard(0);
+        let mut pin_mask_diagonal = Bitboard(0);
 
         let blockers = enemy_bitboard;
 
         let king_square = (my_bitboard & self.by_role.kings).0.trailing_zeros();
         if king_square > 63 {
-            return Bitboard(0);
+            return (Bitboard(0), Bitboard(0));
         }
+
         let king_file = king_square as i32 % 8;
         let king_rank = king_square as i32 / 8;
 
@@ -534,8 +531,7 @@ impl Board {
         let king_reaches_east = Bitboard(
             Bitboard::from_rank_number(king_rank as usize)
                 .0
-                .wrapping_shl(king_file as u32)
-                + 1,
+                .wrapping_shl(king_file as u32),
         ) & king_reaches;
         let king_reaches_east = king_reaches_east & horizontal_mask;
 
@@ -559,7 +555,7 @@ impl Board {
                 let attacker_moves =
                     self.rook_attacks(attack_square as usize, blockers) & direction;
 
-                pin_mask |= (direction & (attacker_moves | Bitboard(1 << attack_square)))
+                pin_mask_vh |= (direction & (attacker_moves | Bitboard(1 << attack_square)))
                     * ((attacker_moves & my_bitboard_without_king).0.count_ones() == 1) as u64;
             }
         }
@@ -586,12 +582,12 @@ impl Board {
                 let attacker_moves =
                     self.bishop_attacks(attack_square as usize, blockers) & direction;
 
-                pin_mask |= (direction & (attacker_moves | Bitboard(1 << attack_square)))
+                pin_mask_diagonal |= (direction & (attacker_moves | Bitboard(1 << attack_square)))
                     * ((attacker_moves & my_bitboard_without_king).0.count_ones() == 1) as u64;
             }
         }
 
-        pin_mask
+        (pin_mask_vh, pin_mask_diagonal)
     }
 
     pub fn seen_by_enemy(self, turn: Color) -> Bitboard {
