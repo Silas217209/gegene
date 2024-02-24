@@ -10,6 +10,7 @@ use crate::board::Board;
 use crate::game::Outcome;
 use crate::lookup::knight::KNIGHT_MOVES;
 use crate::{bitboard::Bitboard, game::Game, r#move::Move, uci::TimeControl};
+use crate::r#move::{MoveType, Square};
 use crate::role::Role;
 
 const PAWN_VALUE: i32 = 100;
@@ -152,7 +153,8 @@ const EG_KING_TABLE: [i32; 64] = [
 ];
 
 const MAX_DEPTH: u32 = 40;
-
+const MIN: i32 = -100_000;
+const MAX: i32 = 100_000;
 pub struct TranspositionTable {
     table: HashMap<u64, TTEntry>,
 }
@@ -199,6 +201,7 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
     let (mut moves, count) = game.get_legal_moves();
     sort_moves(&mut moves, count, is_endgame(&game), None);
     let mut evaluations: HashMap<u32, i32> = HashMap::new();
+    let mut tt = TranspositionTable::new();
 
     let time = match time_control {
         TimeControl::Infinite => 30_000,
@@ -220,11 +223,10 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
 
     let mut tt = TranspositionTable::new();
 
-    let mut best_value = i16::MIN as i32;
-    let mut best_move: Option<Move> = None;
+    let mut best_value = MIN;
 
-    let mut alpha = i16::MIN as i32;
-    let mut beta = i16::MAX as i32;
+    let mut alpha = MIN;
+    let mut beta = MAX;
 
     let mut depth = 1;
     while start.elapsed() < Duration::from_millis(time) && depth <= MAX_DEPTH {
@@ -243,7 +245,7 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
                 start,
                 time,
             );
-            evaluations.insert(moves[i].0, value + evaluate_move(moves[i], is_endgame(&game)) / 10);
+            evaluations.insert(moves[i].0, value);
 
             if value < best_value {
                 continue;
@@ -258,12 +260,11 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
                     start,
                     time,
                 );
-                evaluations.insert(moves[i].0, value + evaluate_move(moves[i], is_endgame(&game)) / 10);
+                evaluations.insert(moves[i].0, value);
             }
 
             if value > best_value {
                 best_value = value;
-                best_move = Some(moves[i]);
             }
 
             if value >= beta {
@@ -332,7 +333,7 @@ pub fn negamax(
     start: Instant,
     time: u64,
 ) -> i32 {
-    if depth == 0 || start.elapsed() > Duration::from_millis(time) {
+    if depth <= 0 || start.elapsed() > Duration::from_millis(time) {
         return evaluate(&game);
     }
 
@@ -351,14 +352,14 @@ pub fn negamax(
         {
             return -10;
         }
-        return i16::MIN as i32;
+        return MIN;
     }
 
     if let Outcome::Draw(_) = game.outcome {
         return -10;
     }
 
-    let mut best_value = i16::MIN as i32;
+    let mut best_value = MIN;
     let mut alpha = alpha;
 
 
@@ -408,7 +409,7 @@ pub fn evaluate(game: &Game) -> i32 {
     let mut opponent = 0;
 
     let my_bitboard = game.board.my_bitboard(game.is_white);
-    let enemy_bitboard = game.board.my_bitboard(!game.is_white);
+    let enemy_bitboard = game.board.enemy_bitboard(game.is_white);
 
     let mut loop_bitboard = my_bitboard | enemy_bitboard;
     while loop_bitboard.0 != 0 {
@@ -464,6 +465,34 @@ pub fn evaluate(game: &Game) -> i32 {
     opponent += enemy_rooks * ROOK_VALUE;
     opponent += enemy_queens * QUEEN_VALUE;
 
+    // bishop pair
+    if my_bishops > 1 {
+        me += 50;
+    } else {
+        me -= 50;
+    }
+    if enemy_bishops > 1 {
+        opponent += 50;
+    } else {
+        opponent -= 50;
+    }
+
+    let pawn_count = my_pawns + enemy_pawns;
+    // sliding pieces better with less pawns
+    if pawn_count < 8 {
+        me += my_bishops * 10;
+        me += my_rooks * 10;
+        me += my_queens * 10;
+        opponent += enemy_bishops * 10;
+        opponent += enemy_rooks * 10;
+        opponent += enemy_queens * 10;
+    }
+    // knights better with more pawns
+    if pawn_count > 8 {
+        me += my_knights * 10;
+        opponent += enemy_knights * 10;
+    }
+
     return me - opponent;
 }
 
@@ -509,23 +538,27 @@ pub fn sort_moves(
 pub fn evaluate_move(m: Move, is_endgame: bool) -> i32 {
     let mut score = 0;
     score += match m.move_type() {
-        crate::r#move::MoveType::Promotion => match m.promotion_role() {
+        MoveType::Promotion => match m.promotion_role() {
             crate::role::PromotionRole::Queen => QUEEN_VALUE,
             crate::role::PromotionRole::Rook => ROOK_VALUE,
             crate::role::PromotionRole::Bishop => BISHOP_VALUE,
             crate::role::PromotionRole::Knight => KNIGHT_VALUE,
         },
-        _ => 0,
+        MoveType::Quiet => 0,
+        MoveType::DoublePawnPush => 20,
+        MoveType::EnPassant => 5,
+        MoveType::KingsideCastle => 10,
+        MoveType::QueensideCastle => 10,
     };
 
     if m.is_capture() {
         let captured_value = match m.capture_role() {
-            crate::role::Role::Pawn => PAWN_VALUE,
-            crate::role::Role::Knight => KNIGHT_VALUE,
-            crate::role::Role::Bishop => BISHOP_VALUE,
-            crate::role::Role::Rook => ROOK_VALUE,
-            crate::role::Role::Queen => QUEEN_VALUE,
-            _ => 0,
+            Role::Pawn => PAWN_VALUE,
+            Role::Knight => KNIGHT_VALUE,
+            Role::Bishop => BISHOP_VALUE,
+            Role::Rook => ROOK_VALUE,
+            Role::Queen => QUEEN_VALUE,
+            Role::King => KING_VALUE,
         };
 
         // winning capture
@@ -535,7 +568,7 @@ pub fn evaluate_move(m: Move, is_endgame: bool) -> i32 {
             score -= 10;
         }
 
-        score += captured_value;
+        score += captured_value + 5;
     }
     let (mg_table, eg_table) = match m.role() {
         Role::Pawn => (MG_PAWN_TABLE, EG_PAWN_TABLE),
