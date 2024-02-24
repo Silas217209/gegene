@@ -10,151 +10,11 @@ use crate::board::Board;
 use crate::game::Outcome;
 use crate::lookup::knight::KNIGHT_MOVES;
 use crate::{bitboard::Bitboard, game::Game, r#move::Move, uci::TimeControl};
+use crate::piece::Piece;
 use crate::r#move::{MoveType, Square};
 use crate::role::Role;
+use crate::values::*;
 
-const PAWN_VALUE: i32 = 100;
-const KNIGHT_VALUE: i32 = 320;
-const BISHOP_VALUE: i32 = 330;
-const ROOK_VALUE: i32 = 500;
-const QUEEN_VALUE: i32 = 900;
-const KING_VALUE: i32 = 20_000;
-
-const MG_PAWN_TABLE: [i32; 64] = [
-    0,  0,  0,  0,  0,  0,  0,  0,
-    50, 50, 50, 50, 50, 50, 50, 50,
-    10, 10, 20, 30, 30, 20, 10, 10,
-    5,  5, 10, 25, 25, 10,  5,  5,
-    0,  0,  0, 20, 20,  0,  0,  0,
-    5, -5,-10,  0,  0,-10, -5,  5,
-    5, 10, 10,-20,-20, 10, 10,  5,
-    0,  0,  0,  0,  0,  0,  0,  0
-];
-
-const EG_PAWN_TABLE: [i32; 64] = [
-    0,  0,  0,  0,  0,  0,  0,  0,
-    50, 50, 50, 50, 50, 50, 50, 50,
-    10, 10, 20, 30, 30, 20, 10, 10,
-    5,  5, 10, 25, 25, 10,  5,  5,
-    0,  0,  0, 20, 20,  0,  0,  0,
-    5, -5,-10,  0,  0,-10, -5,  5,
-    5, 10, 10,-20,-20, 10, 10,  5,
-    0,  0,  0,  0,  0,  0,  0,  0
-];
-
-const MG_KNIGHT_TABLE: [i32; 64] = [
-    -50,-40,-30,-30,-30,-30,-40,-50,
-    -40,-20,  0,  0,  0,  0,-20,-40,
-    -30,  0, 10, 15, 15, 10,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30,
-    -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 10, 15, 15, 10,  5,-30,
-    -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-40,-30,-30,-30,-30,-40,-50,
-];
-
-const EG_KNIGHT_TABLE: [i32; 64] = [
-    -50,-40,-30,-30,-30,-30,-40,-50,
-    -40,-20,  0,  0,  0,  0,-20,-40,
-    -30,  0, 10, 15, 15, 10,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30,
-    -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 10, 15, 15, 10,  5,-30,
-    -40,-20,  0,  5,  5,  0,-20,-40,
-    -50,-40,-30,-30,-30,-30,-40,-50,
-];
-
-const MG_BISHOP_TABLE: [i32; 64] = [
-    -20,-10,-10,-10,-10,-10,-10,-20,
-    -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10,
-    -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10,
-    -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10,
-    -20,-10,-10,-10,-10,-10,-10,-20,
-];
-
-const EG_BISHOP_TABLE: [i32; 64] = [
-    -20,-10,-10,-10,-10,-10,-10,-20,
-    -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10,
-    -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10,
-    -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10,
-    -20,-10,-10,-10,-10,-10,-10,-20,
-];
-
-const MG_ROOK_TABLE: [i32; 64] = [
-    0,  0,  0,  0,  0,  0,  0,  0,
-    5, 10, 10, 10, 10, 10, 10,  5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    0,  0,  0,  5,  5,  0,  0,  0
-];
-
-const EG_ROOK_TABLE: [i32; 64] = [
-    0,  0,  0,  0,  0,  0,  0,  0,
-    5, 10, 10, 10, 10, 10, 10,  5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,
-    0,  0,  0,  5,  5,  0,  0,  0
-];
-
-const MG_QUEEN_TABLE: [i32; 64] = [
-    -20,-10,-10, -5, -5,-10,-10,-20,
-    -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5,  5,  5,  5,  0,-10,
-    -5,  0,  5,  5,  5,  5,  0, -5,
-    0,  0,  5,  5,  5,  5,  0, -5,
-    -10,  5,  5,  5,  5,  5,  0,-10,
-    -10,  0,  5,  0,  0,  0,  0,-10,
-    -20,-10,-10, -5, -5,-10,-10,-20
-];
-
-const EG_QUEEN_TABLE: [i32; 64] = [
-    -20,-10,-10, -5, -5,-10,-10,-20,
-    -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5,  5,  5,  5,  0,-10,
-    -5,  0,  5,  5,  5,  5,  0, -5,
-    0,  0,  5,  5,  5,  5,  0, -5,
-    -10,  5,  5,  5,  5,  5,  0,-10,
-    -10,  0,  5,  0,  0,  0,  0,-10,
-    -20,-10,-10, -5, -5,-10,-10,-20
-];
-
-const MG_KING_TABLE: [i32; 64] = [
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30,
-    -20,-30,-30,-40,-40,-30,-30,-20,
-    -10,-20,-20,-20,-20,-20,-20,-10,
-    20, 20,  0,  0,  0,  0, 20, 20,
-    20, 30, 10,  0,  0, 10, 30, 20
-];
-
-const EG_KING_TABLE: [i32; 64] = [
-    -50,-40,-30,-20,-20,-30,-40,-50,
-    -30,-20,-10,  0,  0,-10,-20,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-30,  0,  0,  0,  0,-30,-30,
-    -50,-30,-30,-30,-30,-30,-30,-50
-];
-
-const MAX_DEPTH: u32 = 40;
-const MIN: i32 = -100_000;
-const MAX: i32 = 100_000;
 pub struct TranspositionTable {
     table: HashMap<u64, TTEntry>,
 }
@@ -403,97 +263,53 @@ pub fn negamax(
 
     return best_value;
 }
-
+// from https://github.com/MitchelPaulin/Walleye
 pub fn evaluate(game: &Game) -> i32 {
-    let mut me = 0;
-    let mut opponent = 0;
+    let mut white_mg = 0;
+    let mut white_eg = 0;
+    let mut black_mg = 0;
+    let mut black_eg = 0;
+    let mut game_phase = 0;
 
-    let my_bitboard = game.board.my_bitboard(game.is_white);
-    let enemy_bitboard = game.board.enemy_bitboard(game.is_white);
+    let mut loop_bitbaord = game.board.my_bitboard(game.is_white) | game.board.enemy_bitboard(game.is_white);
+    while loop_bitbaord.0 != 0 {
+        let square_bitboard = Bitboard(loop_bitbaord.0.blsi());
+        let square_number = square_bitboard.0.trailing_zeros() as i32;
+        let piece = game.board.piece_at(square_number);
 
-    let mut loop_bitboard = my_bitboard | enemy_bitboard;
-    while loop_bitboard.0 != 0 {
-        let square = loop_bitboard.0.trailing_zeros();
-        let piece = game.board.piece_at(square as i32).unwrap();
+        if piece.is_none() {
+            loop_bitbaord.0 = loop_bitbaord.0.blsr();
+            continue;
+        }
+        let piece = piece.unwrap();
 
-        let (mg_table, eg_table) = match piece.role {
-            Role::Pawn => (MG_PAWN_TABLE, EG_PAWN_TABLE),
-            Role::Bishop => (MG_BISHOP_TABLE, EG_BISHOP_TABLE),
-            Role::Knight => (MG_KNIGHT_TABLE, EG_KNIGHT_TABLE),
-            Role::Rook => (MG_ROOK_TABLE, EG_ROOK_TABLE),
-            Role::Queen => (MG_QUEEN_TABLE, EG_QUEEN_TABLE),
-            Role::King => (MG_KING_TABLE, EG_KING_TABLE),
-        };
-
-        let table = if is_endgame(game) { eg_table } else { mg_table };
-        let score = if piece.is_white {
-            table[63 - square as usize]
+        game_phase += game_phase_val(piece.role);
+        if piece.is_white {
+            white_mg += mg_table(piece.role)[63 - square_number as usize];
+            white_eg += eg_table(piece.role)[63 - square_number as usize];
         } else {
-            table[square as usize]
-        };
-
-        if piece.is_white == game.is_white {
-            me += score;
-        } else {
-            opponent += score;
+            black_mg += mg_table(piece.role)[square_number as usize];
+            black_eg += eg_table(piece.role)[square_number as usize];
         }
 
-        loop_bitboard.0 &= loop_bitboard.0.blsr();
+        loop_bitbaord.0 = loop_bitbaord.0.blsr();
     }
 
-    let my_pawns = (game.board.by_role.pawns & my_bitboard).0.count_ones() as i32;
-    let my_knights = (game.board.by_role.knights & my_bitboard).0.count_ones() as i32;
-    let my_bishops = (game.board.by_role.bishops & my_bitboard).0.count_ones() as i32;
-    let my_rooks = (game.board.by_role.rooks & my_bitboard).0.count_ones() as i32;
-    let my_queens = (game.board.by_role.queens & my_bitboard).0.count_ones() as i32;
 
-    let enemy_pawns = (game.board.by_role.pawns & enemy_bitboard).0.count_ones() as i32;
-    let enemy_knights = (game.board.by_role.knights & enemy_bitboard).0.count_ones() as i32;
-    let enemy_bishops = (game.board.by_role.bishops & enemy_bitboard).0.count_ones() as i32;
-    let enemy_rooks = (game.board.by_role.rooks & enemy_bitboard).0.count_ones() as i32;
-    let enemy_queens = (game.board.by_role.queens & enemy_bitboard).0.count_ones() as i32;
-
-    me += my_pawns * PAWN_VALUE;
-    me += my_knights * KNIGHT_VALUE;
-    me += my_bishops * BISHOP_VALUE;
-    me += my_rooks * ROOK_VALUE;
-    me += my_queens * QUEEN_VALUE;
-
-    opponent += enemy_pawns * PAWN_VALUE;
-    opponent += enemy_knights * KNIGHT_VALUE;
-    opponent += enemy_bishops * BISHOP_VALUE;
-    opponent += enemy_rooks * ROOK_VALUE;
-    opponent += enemy_queens * QUEEN_VALUE;
-
-    // bishop pair
-    if my_bishops > 1 {
-        me += 50;
+    let (mg_score, eg_score) = if game.is_white {
+        (white_mg - black_mg, white_eg - black_eg)
     } else {
-        me -= 50;
-    }
-    if enemy_bishops > 1 {
-        opponent += 50;
-    } else {
-        opponent -= 50;
-    }
+        (black_mg - white_mg, black_eg - white_eg)
+    };
 
-    let pawn_count = my_pawns + enemy_pawns;
-    // sliding pieces better with less pawns
-    if pawn_count < 8 {
-        me += my_bishops * 10;
-        me += my_rooks * 10;
-        me += my_queens * 10;
-        opponent += enemy_bishops * 10;
-        opponent += enemy_rooks * 10;
-        opponent += enemy_queens * 10;
-    }
-    // knights better with more pawns
-    if pawn_count > 8 {
-        me += my_knights * 10;
-        opponent += enemy_knights * 10;
-    }
+    let mut mg_phase = game_phase;
 
-    return me - opponent;
+    /* in case of early promotion */
+    if mg_phase > 24 {
+        mg_phase = 24;
+    }
+    let eg_phase = 24 - mg_phase;
+    (mg_score * mg_phase + eg_score * eg_phase) / 24
 }
 
 fn is_endgame(game: &Game) -> bool {
@@ -596,4 +412,59 @@ pub fn evaluate_move(m: Move, is_endgame: bool) -> i32 {
     score += to_score - from_score;
 
     score
+}
+
+fn mg_table(role: Role) -> &'static [i32; 64] {
+    match role {
+        Role::Pawn => &MG_PAWN_TABLE,
+        Role::Bishop => &MG_BISHOP_TABLE,
+        Role::Knight => &MG_KNIGHT_TABLE,
+        Role::Rook => &MG_ROOK_TABLE,
+        Role::King => &MG_KING_TABLE,
+        Role::Queen => &MG_QUEEN_TABLE,
+    }
+}
+
+fn eg_table(role: Role) -> &'static [i32; 64] {
+    match role {
+        Role::Pawn => &EG_PAWN_TABLE,
+        Role::Bishop => &EG_BISHOP_TABLE,
+        Role::Knight => &EG_KNIGHT_TABLE,
+        Role::Rook => &EG_ROOK_TABLE,
+        Role::King => &EG_KING_TABLE,
+        Role::Queen => &EG_QUEEN_TABLE,
+    }
+}
+
+fn mg_piece_val(role: Role) -> i32 {
+    match role {
+        Role::Pawn => 82,
+        Role::Knight => 337,
+        Role::Bishop => 365,
+        Role::Rook => 477,
+        Role::Queen => 1025,
+        Role::King => 0,
+    }
+}
+
+fn eg_piece_val(role: Role) -> i32 {
+    match role {
+        Role::Pawn => 94,
+        Role::Knight => 281,
+        Role::Bishop => 297,
+        Role::Rook => 512,
+        Role::Queen => 936,
+        Role::King => 0,
+    }
+}
+
+fn game_phase_val(role: Role) -> i32 {
+    match role {
+        Role::Pawn => 0,
+        Role::Knight => 1,
+        Role::Bishop => 1,
+        Role::Rook => 2,
+        Role::Queen => 4,
+        Role::King => 0,
+    }
 }

@@ -18,6 +18,7 @@ mod piece;
 mod role;
 mod search;
 mod uci;
+mod values;
 
 fn main() {
     let stdin = stdin();

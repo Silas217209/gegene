@@ -12,6 +12,7 @@ use crate::r#move::Square;
 use crate::role::Role;
 use crate::{bitboard::Bitboard, lookup::zobrist::ZOBRIST_VALUES};
 use std::fmt::{Display, Formatter};
+use crate::values::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum File {
@@ -542,9 +543,9 @@ impl Board {
                     & Bitboard::from_rank_number(i / 8 - 1))
                     * (is_white as u64)
                     + ((Bitboard(current_square.0.wrapping_shl(9))
-                        | Bitboard(current_square.0.wrapping_shl(7)))
-                        & Bitboard::from_rank_number(i / 8 + 1))
-                        * (!is_white as u64);
+                    | Bitboard(current_square.0.wrapping_shl(7)))
+                    & Bitboard::from_rank_number(i / 8 + 1))
+                    * (!is_white as u64);
                 bitboard |= seen;
             }
             // clear lsb

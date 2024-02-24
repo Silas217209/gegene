@@ -7,3 +7,4 @@ pub mod r#move;
 mod piece;
 mod role;
 mod uci;
+mod values;
