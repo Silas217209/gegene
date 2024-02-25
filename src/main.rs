@@ -6,7 +6,7 @@ use lookup::generate_zobrist_numbers;
 use uci::RecceiveUCI;
 
 use crate::{game::Game, uci::SendUCI};
-use crate::uci::Score::CP;
+use crate::uci::Score::{CP, Mate};
 
 mod bitboard;
 mod bmi;
@@ -19,7 +19,7 @@ mod role;
 mod search;
 mod uci;
 mod values;
-
+mod score;
 fn main() {
     let stdin = stdin();
     let mut stdout = stdout();
@@ -88,8 +88,8 @@ fn main() {
                     .unwrap();
                 writeln!(
                     stdout,
-                    "{}",
-                    SendUCI::Info(uci::Info::Score(CP(result.best_score as i64))).to_str()
+                    "info score {}",
+                    result.best_score
                 )
                     .unwrap();
             }

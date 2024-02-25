@@ -8,3 +8,4 @@ mod piece;
 mod role;
 mod uci;
 mod values;
+mod score;

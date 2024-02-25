@@ -1,19 +1,18 @@
 use hashbrown::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
 use std::ops::Neg;
 use std::time::Instant;
 use std::usize;
-use std::{i16, time::Duration};
-
+use std::time::Duration;
 use crate::bmi::Bmi;
 use crate::board::Board;
 use crate::game::Outcome;
-use crate::lookup::knight::KNIGHT_MOVES;
-use crate::{bitboard::Bitboard, game::Game, r#move::Move, uci::TimeControl};
-use crate::piece::Piece;
+use crate::{game::Game, r#move::Move, uci::TimeControl};
 use crate::r#move::{MoveType, Square};
 use crate::role::Role;
+use crate::score::Score;
 use crate::values::*;
+
 
 pub struct TranspositionTable {
     table: HashMap<u64, TTEntry>,
@@ -44,7 +43,7 @@ enum NodeType {
 
 #[derive(Copy, Clone)]
 pub struct TTEntry {
-    score: i32,
+    score: Score,
     depth: u32,
     node_type: NodeType,
     best_move: Move,
@@ -52,15 +51,15 @@ pub struct TTEntry {
 
 pub struct SearchResult {
     pub best_move: Move,
-    pub best_score: i32,
+    pub best_score: Score,
     pub time: Duration,
 }
 
 pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
     let start = Instant::now();
     let (mut moves, count) = game.get_legal_moves();
-    sort_moves(&mut moves, count, is_endgame(&game), None);
-    let mut evaluations: HashMap<u32, i32> = HashMap::new();
+    sort_moves(&mut moves, count, game_phase(game.board), None);
+    let mut evaluations: HashMap<u32, Score> = HashMap::new();
     let mut tt = TranspositionTable::new();
 
     let time = match time_control {
@@ -81,12 +80,10 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
         }
     };
 
-    let mut tt = TranspositionTable::new();
+    let mut best_value = Score::CP(MIN);
 
-    let mut best_value = MIN;
-
-    let mut alpha = MIN;
-    let mut beta = MAX;
+    let mut alpha = Score::CP(MIN);
+    let beta = Score::MateIn(1);
 
     let mut depth = 1;
     while start.elapsed() < Duration::from_millis(time) && depth <= MAX_DEPTH {
@@ -99,6 +96,7 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
             let mut value = -negamax(
                 new_game,
                 depth - 1,
+                depth,
                 -beta,
                 -alpha,
                 &mut tt,
@@ -114,6 +112,7 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
                 value = -negamax(
                     new_game,
                     depth - 1,
+                    depth,
                     -beta,
                     -value,
                     &mut tt,
@@ -138,15 +137,14 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
                 moves.sort_by(|&a, &b| {
                     evaluations
                         .get(&b.0)
-                        .unwrap_or(&i32::MIN)
-                        .cmp(evaluations.get(&a.0).unwrap_or(&i32::MIN))
+                        .unwrap_or(&Score::CP(MIN))
+                        .cmp(evaluations.get(&a.0).unwrap_or(&Score::CP(MIN)))
                 });
                 println!("info timeout");
-
                 println!("info score cp {}", best_value);
 
                 for i in 0..count {
-                    println!("{}: {}", moves[i], evaluations.get(&moves[i].0).unwrap_or(&-42));
+                    println!("{}: {}", moves[i], evaluations.get(&moves[i].0).unwrap_or(&Score::CP(MIN)));
                 }
 
                 return SearchResult {
@@ -156,25 +154,40 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
                 };
             }
         }
-
+        if count == 1 {
+            break;
+        }
         println!("info depth {}", depth);
+        println!("info score {}", best_value);
         println!("info currmove {}", moves[0].to_algebraic());
-        println!("info score cp {}", best_value);
+        println!("info time {}", start.elapsed().as_millis() as u64);
+        println!("info string ---------------------------------");
 
         // Sort moves based on evaluations
         moves.sort_by(|&a, &b| {
-            evaluations
+            (evaluations
                 .get(&b.0)
-                .unwrap_or(&i32::MIN)
-                .cmp(evaluations.get(&a.0).unwrap_or(&i32::MIN))
+                .unwrap_or(&Score::CP(MIN)))
+                .cmp(&(evaluations.get(&a.0).unwrap_or(&Score::CP(MIN))))
         });
+
+        if matches!(best_value, Score::MateIn(x) if x > 0) {
+            break;
+        }
+
         depth += 1;
     }
+    moves.sort_by(|&a, &b| {
+        evaluations
+            .get(&b.0)
+            .unwrap_or(&Score::CP(MIN))
+            .cmp(&(evaluations.get(&a.0).unwrap_or(&Score::CP(MIN))))
+    });
 
-    println!("info score cp {}", best_value);
+    println!("info score {}", best_value);
 
     for i in 0..count {
-        println!("{}: {}", moves[i], evaluations.get(&moves[i].0).unwrap_or(&-42));
+        println!("info string {}: {}", moves[i], evaluations.get(&moves[i].0).unwrap_or(&Score::CP(MIN)));
     }
 
     return SearchResult {
@@ -187,14 +200,46 @@ pub fn search(game: Game, time_control: TimeControl) -> SearchResult {
 pub fn negamax(
     game: Game,
     depth: u32,
-    alpha: i32,
-    beta: i32,
+    max_depth: u32,
+    alpha: Score,
+    beta: Score,
     tt: &mut TranspositionTable,
     start: Instant,
     time: u64,
-) -> i32 {
+) -> Score {
+    let mut alpha = alpha;
+    let mut beta = beta;
+    let mut best_move: Option<Move> = None;
+    let mut best_value = Score::CP(MIN);
+
+    if let Some(tt_entry) = tt.get(game.board.zobrist) {
+        if tt_entry.depth >= depth {
+            match tt_entry.node_type {
+                NodeType::Cut => {
+                    if beta <= tt_entry.score {
+                        return tt_entry.score;
+                    }
+                    if alpha < tt_entry.score {
+                        alpha = tt_entry.score;
+                    }
+                }
+                NodeType::All => {
+                    if tt_entry.score <= alpha {
+                        return tt_entry.score;
+                    }
+                    if tt_entry.score < beta {
+                        beta = tt_entry.score;
+                    }
+                }
+                NodeType::PV => {
+                    return tt_entry.score;
+                }
+            }
+        }
+    }
+
     if depth <= 0 || start.elapsed() > Duration::from_millis(time) {
-        return evaluate(&game);
+        return Score::CP(evaluate(&game));
     }
 
     let (mut moves, count) = game.get_legal_moves();
@@ -203,32 +248,39 @@ pub fn negamax(
     } else {
         None
     };
-    sort_moves(&mut moves, count, is_endgame(&game), tt_best_move);
+    sort_moves(&mut moves, count, game_phase(game.board), tt_best_move);
+
     if count == 0 {
-        if game.board.seen_by_enemy(game.is_white)
-            & game.board.by_role.kings
-            & game.board.my_bitboard(game.is_white)
-            == Bitboard(0)
-        {
-            return -10;
+        let check_mask = game.board.check_mask(game.is_white);
+        if !check_mask.0.0 == 0 && !check_mask.1.0 == 0 {
+            // Stalemate
+            return Score::CP(-10);
         }
-        return MIN;
+        // Checkmate
+        return Score::MateIn(-(max_depth as i32 - depth as i32));
     }
+
 
     if let Outcome::Draw(_) = game.outcome {
-        return -10;
+        return Score::CP(-10);
     }
 
-    let mut best_value = MIN;
-    let mut alpha = alpha;
+    // Skip this position if a mating sequence has already been found earlier in
+    // the search, which would be shorter than any mate we could find from here.
+    let mut alpha = alpha.max(Score::MateIn(-(max_depth as i32 - depth as i32)));
+    let mut beta = beta.min(Score::MateIn(max_depth as i32 - depth as i32));
+    if alpha >= beta {
+        return alpha;
+    }
 
 
     for i in 0..count {
-        let mut new_game = game;
+        let mut new_game = game.clone();
         new_game.play(moves[i]);
         let mut value = -negamax(
             new_game,
             depth - 1,
+            max_depth,
             -beta,
             -alpha,
             tt,
@@ -244,6 +296,7 @@ pub fn negamax(
             value = -negamax(
                 new_game,
                 depth - 1,
+                max_depth,
                 -beta,
                 -value,
                 tt,
@@ -252,7 +305,10 @@ pub fn negamax(
             );
         }
 
-        best_value = best_value.max(value);
+        if value > best_value {
+            best_value = value;
+            best_move = Some(moves[i]);
+        }
 
         if best_value >= beta {
             return best_value;
@@ -261,79 +317,79 @@ pub fn negamax(
         alpha = alpha.max(best_value);
     }
 
+    if let Some(best_move) = best_move {
+        tt.insert(game.board.zobrist, TTEntry {
+            score: best_value,
+            depth,
+            node_type: NodeType::PV, // or NodeType::Cut or NodeType::All depending on the situation
+            best_move,
+        });
+    }
+
     return best_value;
 }
+
 // from https://github.com/MitchelPaulin/Walleye
 pub fn evaluate(game: &Game) -> i32 {
-    let mut white_mg = 0;
-    let mut white_eg = 0;
-    let mut black_mg = 0;
-    let mut black_eg = 0;
+    let mut mg_white = 0;
+    let mut eg_white = 0;
+    let mut mg_black = 0;
+    let mut eg_black = 0;
     let mut game_phase = 0;
 
-    let mut loop_bitbaord = game.board.my_bitboard(game.is_white) | game.board.enemy_bitboard(game.is_white);
-    while loop_bitbaord.0 != 0 {
-        let square_bitboard = Bitboard(loop_bitbaord.0.blsi());
-        let square_number = square_bitboard.0.trailing_zeros() as i32;
-        let piece = game.board.piece_at(square_number);
-
+    let mut loop_bitboard = game.board.by_color.white | game.board.by_color.black;
+    while loop_bitboard.0 != 0 {
+        let square_bitboard = loop_bitboard.0.blsi();
+        let square = Square(square_bitboard.trailing_zeros() as u8);
+        let piece = game.board.piece_at(square.0 as i32);
         if piece.is_none() {
-            loop_bitbaord.0 = loop_bitbaord.0.blsr();
+            loop_bitboard.0 = loop_bitboard.0.blsr();
             continue;
         }
+
         let piece = piece.unwrap();
+
 
         game_phase += game_phase_val(piece.role);
         if piece.is_white {
-            white_mg += mg_table(piece.role)[63 - square_number as usize];
-            white_eg += eg_table(piece.role)[63 - square_number as usize];
+            mg_white += mg_piece_val(piece.role);
+            eg_white += eg_piece_val(piece.role);
         } else {
-            black_mg += mg_table(piece.role)[square_number as usize];
-            black_eg += eg_table(piece.role)[square_number as usize];
+            mg_black += mg_piece_val(piece.role);
+            eg_black += eg_piece_val(piece.role);
         }
 
-        loop_bitbaord.0 = loop_bitbaord.0.blsr();
+        loop_bitboard.0 = loop_bitboard.0.blsr();
     }
 
-
-    let (mg_score, eg_score) = if game.is_white {
-        (white_mg - black_mg, white_eg - black_eg)
+    let mg_score = if game.is_white {
+        mg_white - mg_black
     } else {
-        (black_mg - white_mg, black_eg - white_eg)
+        mg_black - mg_white
+    };
+    let eg_score = if game.is_white {
+        eg_white - eg_black
+    } else {
+        eg_black - eg_white
     };
 
     let mut mg_phase = game_phase;
+    mg_phase = mg_phase.min(24);
 
-    /* in case of early promotion */
-    if mg_phase > 24 {
-        mg_phase = 24;
-    }
     let eg_phase = 24 - mg_phase;
+
     (mg_score * mg_phase + eg_score * eg_phase) / 24
-}
-
-fn is_endgame(game: &Game) -> bool {
-    let mut material = 0;
-    // if the piece values are less than 30 Pawns, it's endgame
-    material += (game.board.by_role.pawns).0.count_ones() as i32 * PAWN_VALUE;
-    material += (game.board.by_role.knights).0.count_ones() as i32 * KNIGHT_VALUE;
-    material += (game.board.by_role.bishops).0.count_ones() as i32 * BISHOP_VALUE;
-    material += (game.board.by_role.rooks).0.count_ones() as i32 * ROOK_VALUE;
-    material += (game.board.by_role.queens).0.count_ones() as i32 * QUEEN_VALUE;
-    material += (game.board.by_role.kings).0.count_ones() as i32 * KING_VALUE;
-
-    return material < 30 * PAWN_VALUE;
 }
 
 pub fn sort_moves(
     moves: &mut [Move; 218],
     count: usize,
-    is_endgame: bool,
+    phase: i32,
     tt_best_move: Option<Move>,
 ) {
     let mut evaluated_moves: Vec<(Move, i32)> = moves[0..count]
         .iter()
-        .map(|&m| (m, evaluate_move(m, is_endgame)))
+        .map(|&m| (m, evaluate_move(m, phase)))
         .collect();
 
     evaluated_moves.sort_by(|a, b| b.1.cmp(&a.1));
@@ -351,70 +407,77 @@ pub fn sort_moves(
     }
 }
 
-pub fn evaluate_move(m: Move, is_endgame: bool) -> i32 {
-    let mut score = 0;
-    score += match m.move_type() {
+pub fn evaluate_move(m: Move, phase: i32) -> i32 {
+    let mut mg_score = 0;
+    let mut eg_score = 0;
+
+    let file_from = m.from().0 % 8;
+    let rank_from = m.from().0 / 8;
+
+    let file_to = m.to().0 % 8;
+    let rank_to = m.to().0 / 8;
+
+    let file_from = if m.is_white() { 7 - file_from } else { file_from };
+    let file_to = if m.is_white() { 7 - file_to } else { file_to };
+
+    let rank_from = if m.is_white() { 7 - rank_from } else { rank_from };
+    let rank_to = if m.is_white() { 7 - rank_to } else { rank_to };
+
+    mg_score += match m.move_type() {
         MoveType::Promotion => match m.promotion_role() {
-            crate::role::PromotionRole::Queen => QUEEN_VALUE,
-            crate::role::PromotionRole::Rook => ROOK_VALUE,
-            crate::role::PromotionRole::Bishop => BISHOP_VALUE,
-            crate::role::PromotionRole::Knight => KNIGHT_VALUE,
+            crate::role::PromotionRole::Queen => mg_table(Role::Queen)[rank_to as usize][file_to as usize],
+            crate::role::PromotionRole::Rook => mg_table(Role::Rook)[rank_to as usize][file_to as usize],
+            crate::role::PromotionRole::Bishop => mg_table(Role::Bishop)[rank_to as usize][file_to as usize],
+            crate::role::PromotionRole::Knight => mg_table(Role::Knight)[rank_to as usize][file_to as usize],
         },
         MoveType::Quiet => 0,
-        MoveType::DoublePawnPush => 20,
+        MoveType::DoublePawnPush => 5,
+        MoveType::EnPassant => 5,
+        MoveType::KingsideCastle => 10,
+        MoveType::QueensideCastle => 10,
+    };
+
+    eg_score += match m.move_type() {
+        MoveType::Promotion => match m.promotion_role() {
+            crate::role::PromotionRole::Queen => eg_table(Role::Queen)[rank_to as usize][file_to as usize],
+            crate::role::PromotionRole::Rook => eg_table(Role::Rook)[rank_to as usize][file_to as usize],
+            crate::role::PromotionRole::Bishop => eg_table(Role::Bishop)[rank_to as usize][file_to as usize],
+            crate::role::PromotionRole::Knight => eg_table(Role::Knight)[rank_to as usize][file_to as usize],
+        },
+        MoveType::Quiet => 0,
+        MoveType::DoublePawnPush => 5,
         MoveType::EnPassant => 5,
         MoveType::KingsideCastle => 10,
         MoveType::QueensideCastle => 10,
     };
 
     if m.is_capture() {
-        let captured_value = match m.capture_role() {
-            Role::Pawn => PAWN_VALUE,
-            Role::Knight => KNIGHT_VALUE,
-            Role::Bishop => BISHOP_VALUE,
-            Role::Rook => ROOK_VALUE,
-            Role::Queen => QUEEN_VALUE,
-            Role::King => KING_VALUE,
-        };
+        let mg_captured_value = mg_table(m.capture_role())[rank_to as usize][file_to as usize];
+        let eg_captured_value = eg_table(m.capture_role())[rank_to as usize][file_to as usize];
 
         // winning capture
         if m.capture_role() as u8 >= m.role() as u8 {
-            score += 10;
+            mg_score += 10;
+            eg_score += 10;
         } else {
-            score -= 10;
+            mg_score -= 10;
+            eg_score -= 10;
         }
 
-        score += captured_value + 5;
+        mg_score += mg_captured_value + 5;
+        eg_score += eg_captured_value + 5;
     }
-    let (mg_table, eg_table) = match m.role() {
-        Role::Pawn => (MG_PAWN_TABLE, EG_PAWN_TABLE),
-        Role::Bishop => (MG_BISHOP_TABLE, EG_BISHOP_TABLE),
-        Role::Knight => (MG_KNIGHT_TABLE, EG_KNIGHT_TABLE),
-        Role::Rook => (MG_ROOK_TABLE, EG_ROOK_TABLE),
-        Role::Queen => (MG_QUEEN_TABLE, EG_QUEEN_TABLE),
-        Role::King => (MG_KING_TABLE, EG_KING_TABLE),
-    };
 
-    let table = if is_endgame { eg_table } else { mg_table };
+    mg_score += mg_table(m.role())[rank_to as usize][file_to as usize];
+    eg_score += eg_table(m.role())[rank_to as usize][file_to as usize];
 
-    let to_score = if m.is_white() {
-        table[63 - m.to().0 as usize]
-    } else {
-        table[m.to().0 as usize]
-    };
+    mg_score -= mg_table(m.role())[rank_from as usize][file_from as usize];
+    eg_score -= eg_table(m.role())[rank_from as usize][file_from as usize];
 
-    let from_score = if m.is_white() {
-        table[63 - m.from().0 as usize]
-    } else {
-        table[m.from().0 as usize]
-    };
-
-    score += to_score - from_score;
-
-    score
+    ((mg_score * (256 - phase)) + (eg_score * phase)) / 256
 }
 
-fn mg_table(role: Role) -> &'static [i32; 64] {
+fn mg_table(role: Role) -> &'static [[i32; 8]; 8] {
     match role {
         Role::Pawn => &MG_PAWN_TABLE,
         Role::Bishop => &MG_BISHOP_TABLE,
@@ -425,7 +488,7 @@ fn mg_table(role: Role) -> &'static [i32; 64] {
     }
 }
 
-fn eg_table(role: Role) -> &'static [i32; 64] {
+fn eg_table(role: Role) -> &'static [[i32; 8]; 8] {
     match role {
         Role::Pawn => &EG_PAWN_TABLE,
         Role::Bishop => &EG_BISHOP_TABLE,
@@ -466,5 +529,30 @@ fn game_phase_val(role: Role) -> i32 {
         Role::Rook => 2,
         Role::Queen => 4,
         Role::King => 0,
+    }
+}
+
+fn game_phase(board: Board) -> i32 {
+    let total_phase = game_phase_val(Role::Pawn) * 16 + game_phase_val(Role::Knight) * 4 + game_phase_val(Role::Bishop) * 4 + game_phase_val(Role::Rook) * 4 + game_phase_val(Role::Queen) * 2;
+    let mut phase = total_phase;
+
+    phase -= (board.by_role.pawns & board.by_color.white).0.count_ones() as i32 * game_phase_val(Role::Pawn);
+    phase -= (board.by_role.knights & board.by_color.white).0.count_ones() as i32 * game_phase_val(Role::Knight);
+
+    phase -= (board.by_role.rooks & board.by_color.black).0.count_ones() as i32 * game_phase_val(Role::Rook);
+    phase -= (board.by_role.queens & board.by_color.black).0.count_ones() as i32 * game_phase_val(Role::Queen);
+
+
+    (phase * 256 + (total_phase / 2)) / total_phase
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_evaluation_equal() {
+        let b = Game::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").expect("invalid fen");
+        assert_eq!(evaluate(&b), 0);
     }
 }
